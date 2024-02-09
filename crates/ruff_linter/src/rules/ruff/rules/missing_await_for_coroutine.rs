@@ -21,7 +21,7 @@ use crate::checkers::ast::Checker;
 /// ## Example
 /// ```python
 /// async def test():
-///    print("never scheduled")
+///    print("never awaited")
 ///
 ///
 /// async def main():
@@ -31,7 +31,7 @@ use crate::checkers::ast::Checker;
 /// Use instead:
 /// ```python
 /// async def test():
-///    print("never scheduled")
+///    print("awaited")
 ///
 ///
 /// async def main():
