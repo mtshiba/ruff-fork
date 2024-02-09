@@ -18,11 +18,10 @@ use crate::checkers::ast::Checker;
 /// using `asyncio.sleep` instead of `await asyncio.sleep`. Python's asyncio runtime will emit
 /// a warning when a coroutine is not awaited.
 ///
-/// ## Example
+/// ## Examples
 /// ```python
 /// async def test():
 ///    print("never awaited")
-///
 ///
 /// async def main():
 ///    test()
@@ -33,11 +32,9 @@ use crate::checkers::ast::Checker;
 /// async def test():
 ///    print("awaited")
 ///
-///
 /// async def main():
 ///    await test()
 /// ```
-///
 #[violation]
 pub struct MissingAwaitForCoroutine;
 
@@ -127,6 +124,10 @@ fn possibly_missing_await(call: &ExprCall, semantic: &SemanticModel) -> bool {
     false
 }
 
+/// Generate a [`Fix`] to add `await` for coroutine.
+///
+/// For example:
+/// - Given `asyncio.sleep(1)`, generate `await asyncio.sleep(1)`.
 fn generate_fix(call: &ExprCall) -> Expr {
     Expr::Await(ExprAwait {
         value: Box::new(Expr::Call(call.clone())),
