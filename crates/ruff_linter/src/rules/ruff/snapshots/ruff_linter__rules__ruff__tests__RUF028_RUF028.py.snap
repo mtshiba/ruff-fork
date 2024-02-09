@@ -1,0 +1,147 @@
+---
+source: crates/ruff_linter/src/rules/ruff/mod.rs
+---
+RUF028.py:9:5: RUF028 [*] Coroutine is not awaited
+   |
+ 7 |     async def coro():
+ 8 |         pass
+ 9 |     coro()  # RUF028
+   |     ^^^^^^ RUF028
+10 | 
+11 | async def test_coroutine_without_await():
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+6  6  | async def test_coroutine_without_await():
+7  7  |     async def coro():
+8  8  |         pass
+9     |-    coro()  # RUF028
+   9  |+    await coro()  # RUF028
+10 10 | 
+11 11 | async def test_coroutine_without_await():
+12 12 |     async def coro():
+
+RUF028.py:22:5: RUF028 [*] Coroutine is not awaited
+   |
+20 |         pass
+21 |     not_coro()
+22 |     coro()  # RUF028
+   |     ^^^^^^ RUF028
+23 | 
+24 | async def test_coroutine_without_await():
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+19 19 |     async def coro():
+20 20 |         pass
+21 21 |     not_coro()
+22    |-    coro()  # RUF028
+   22 |+    await coro()  # RUF028
+23 23 | 
+24 24 | async def test_coroutine_without_await():
+25 25 |     async def coro():
+
+RUF028.py:26:9: RUF028 [*] Coroutine is not awaited
+   |
+24 | async def test_coroutine_without_await():
+25 |     async def coro():
+26 |         another_coro()  # RUF028
+   |         ^^^^^^^^^^^^^^ RUF028
+27 |     async def another_coro():
+28 |         pass
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+23 23 | 
+24 24 | async def test_coroutine_without_await():
+25 25 |     async def coro():
+26    |-        another_coro()  # RUF028
+   26 |+        await another_coro()  # RUF028
+27 27 |     async def another_coro():
+28 28 |         pass
+29 29 | 
+
+RUF028.py:33:5: RUF028 [*] Coroutine is not awaited
+   |
+32 | async def test_asyncio_api_without_await():
+33 |     asyncio.sleep(0.5)  # RUF028
+   |     ^^^^^^^^^^^^^^^^^^ RUF028
+34 | 
+35 | async def test_asyncio_api_without_await():
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+30 30 |     await coro()
+31 31 | 
+32 32 | async def test_asyncio_api_without_await():
+33    |-    asyncio.sleep(0.5)  # RUF028
+   33 |+    await asyncio.sleep(0.5)  # RUF028
+34 34 | 
+35 35 | async def test_asyncio_api_without_await():
+36 36 |     async def coro():
+
+RUF028.py:37:9: RUF028 [*] Coroutine is not awaited
+   |
+35 | async def test_asyncio_api_without_await():
+36 |     async def coro():
+37 |         asyncio.sleep(0.5)  # RUF028
+   |         ^^^^^^^^^^^^^^^^^^ RUF028
+38 |     await asyncio.wait(coro)
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+34 34 | 
+35 35 | async def test_asyncio_api_without_await():
+36 36 |     async def coro():
+37    |-        asyncio.sleep(0.5)  # RUF028
+   37 |+        await asyncio.sleep(0.5)  # RUF028
+38 38 |     await asyncio.wait(coro)
+39 39 | 
+40 40 | async def test_asyncio_api_without_await():
+
+RUF028.py:43:5: RUF028 [*] Coroutine is not awaited
+   |
+41 |     async def coro():
+42 |         await asyncio.sleep(0.5)
+43 |     asyncio.wait_for(coro) # RUF028
+   |     ^^^^^^^^^^^^^^^^^^^^^^ RUF028
+44 | 
+45 | async def test_asyncio_api_without_await():
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+40 40 | async def test_asyncio_api_without_await():
+41 41 |     async def coro():
+42 42 |         await asyncio.sleep(0.5)
+43    |-    asyncio.wait_for(coro) # RUF028
+   43 |+    await asyncio.wait_for(coro) # RUF028
+44 44 | 
+45 45 | async def test_asyncio_api_without_await():
+46 46 |     async def coro1():
+
+RUF028.py:51:5: RUF028 [*] Coroutine is not awaited
+   |
+49 |         await asyncio.sleep(0.5)
+50 |     tasks = [coro1(), coro2()]
+51 |     asyncio.gather(*tasks) # RUF028
+   |     ^^^^^^^^^^^^^^^^^^^^^^ RUF028
+   |
+   = help: Coroutine is not awaited
+
+ℹ Unsafe fix
+48 48 |     async def coro2():
+49 49 |         await asyncio.sleep(0.5)
+50 50 |     tasks = [coro1(), coro2()]
+51    |-    asyncio.gather(*tasks) # RUF028
+   51 |+    await asyncio.gather(*tasks) # RUF028
+52 52 | 
+53 53 | 
+54 54 | # Non-violation cases: RUF028
+
+
