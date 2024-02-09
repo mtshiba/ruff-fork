@@ -13,7 +13,6 @@ use crate::checkers::ast::Checker;
 /// Checks for coroutines that are not awaited. This rule is only active in async contexts.
 ///
 /// ## Why is this bad?
-///
 /// Coroutines are not executed until they are awaited. If a coroutine is not awaited, it will
 /// not be executed, and the program will not behave as expected. This is a common mistake when
 /// using `asyncio.sleep` instead of `await asyncio.sleep`. Python's asyncio runtime will emit
