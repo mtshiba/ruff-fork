@@ -15,25 +15,28 @@ use crate::checkers::ast::Checker;
 /// ## Why is this bad?
 /// Coroutines are not executed until they are awaited. If a coroutine is not awaited, it will
 /// not be executed, and the program will not behave as expected. This is a common mistake when
-/// using `asyncio.sleep` instead of `await asyncio.sleep`. Python's asyncio runtime will emit
-/// a warning when a coroutine is not awaited.
+/// using `asyncio.sleep` instead of `await asyncio.sleep`.
+///
+/// Python's asyncio runtime will emit a warning when a coroutine is not awaited.
 ///
 /// ## Examples
 /// ```python
-/// async def test():
-///    print("never awaited")
+/// async def foo():
+///     pass
 ///
-/// async def main():
-///    test()
+///
+/// async def bar():
+///     foo()
 /// ```
 ///
 /// Use instead:
 /// ```python
-/// async def test():
-///    print("awaited")
+/// async def foo():
+///     pass
 ///
-/// async def main():
-///    await test()
+///
+/// async def bar():
+///     await foo()
 /// ```
 #[violation]
 pub struct MissingAwaitForCoroutine;
@@ -59,7 +62,8 @@ pub(crate) fn missing_await_for_coroutine(checker: &mut Checker, call: &ExprCall
 
     // Try to detect possible scenarios where await is missing and ignore other cases
     // For example, if the call is not a direct child of an statement expression or assignment statement
-    // then it's not reliable to determine if await is missing. User might return coroutine object from a function or pass it as an argument
+    // then it's not reliable to determine if await is missing.
+    // User might return coroutine object from a function or pass it as an argument
     if !possibly_missing_await(call, checker.semantic()) {
         return;
     }
