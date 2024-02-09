@@ -37,27 +37,6 @@ use crate::checkers::ast::Checker;
 ///    await test()
 /// ```
 ///
-/// ## Example
-/// ```python
-/// import asyncio
-///
-/// async def test():
-///    asyncio.sleep(1)
-///
-/// async def main():
-///    await test()
-/// ```
-///
-/// Use instead:
-/// ```python
-/// import asyncio
-///
-/// async def test():
-///    await asyncio.sleep(1)
-///
-/// async def main():
-///    await test()
-/// ```
 #[violation]
 pub struct MissingAwaitForCoroutine;
 
