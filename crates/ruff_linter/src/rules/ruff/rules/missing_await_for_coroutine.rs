@@ -23,6 +23,7 @@ use crate::checkers::ast::Checker;
 /// async def test():
 ///    print("never scheduled")
 ///
+///
 /// async def main():
 ///    test()
 /// ```
@@ -31,6 +32,7 @@ use crate::checkers::ast::Checker;
 /// ```python
 /// async def test():
 ///    print("never scheduled")
+///
 ///
 /// async def main():
 ///    await test()
