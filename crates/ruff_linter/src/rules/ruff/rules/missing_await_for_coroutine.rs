@@ -106,8 +106,8 @@ fn is_awaitable_func(func: &Expr, semantic: &SemanticModel) -> bool {
     let binding = semantic.binding(binding_id);
     if let Some(node_id) = binding.source {
         let node = semantic.statement(node_id);
-        if let Stmt::FunctionDef(StmtFunctionDef { is_async, .. }) = node {
-            return *is_async;
+        if let Stmt::FunctionDef(StmtFunctionDef { is_async, name, .. }) = node {
+            return *is_async && name.as_str() == id;
         }
     }
     false

@@ -145,6 +145,6 @@ async def test_coroutine_inside_collections():
     {coro(), coro()}  # OK
     {"coro": coro()}  # OK
 
-    
 
-
+async def test_func_used_in_arg_should_not_raise(func):
+    func()  # OK
