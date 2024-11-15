@@ -2,7 +2,7 @@ use ruff_diagnostics::{Diagnostic, Edit, Fix, FixAvailability, Violation};
 use ruff_macros::{derive_message_formats, violation};
 use ruff_python_ast as ast;
 use ruff_python_ast::helpers;
-use ruff_python_ast::helpers::{NameFinder, StoredNameFinder};
+use ruff_python_ast::helpers::StoredNameFinder;
 use ruff_python_ast::visitor::Visitor;
 use ruff_python_semantic::Binding;
 use ruff_text_size::Ranged;
@@ -83,22 +83,32 @@ pub(crate) fn unused_loop_control_variable(checker: &mut Checker, stmt_for: &ast
         finder.names
     };
 
-    let used_names = {
-        let mut finder = NameFinder::default();
-        for stmt in &stmt_for.body {
-            finder.visit_stmt(stmt);
-        }
-        finder.names
-    };
-
     for (name, expr) in control_names {
         // Ignore names that are already underscore-prefixed.
         if checker.settings.dummy_variable_rgx.is_match(name) {
             continue;
         }
 
-        // Ignore any names that are actually used in the loop body.
-        if used_names.contains_key(name) {
+        // Determine whether the associated binding is referenced in the loop body.
+        // NB: We cannot use `checker.semantic().binding(scope.get(name).unwrap())` because we need to handle cases where the most recent binding is
+        // a deletion or other shadowing.
+        let scope = &checker.semantic().current_scope();
+        let loop_var_binding = scope
+            .get_all(name)
+            .map(|bid| checker.semantic().binding(bid))
+            .find(|bdg| bdg.range == expr.range)
+            .unwrap();
+        if loop_var_binding
+            .references
+            .iter()
+            .map(|&refid| checker.semantic().reference(refid).range())
+            .any(|refrange| {
+                stmt_for
+                    .body
+                    .iter()
+                    .any(|stmt| stmt.range().contains_range(refrange))
+            })
+        {
             continue;
         }
 
@@ -133,7 +143,6 @@ pub(crate) fn unused_loop_control_variable(checker: &mut Checker, stmt_for: &ast
             if certainty == Certainty::Certain {
                 // Avoid fixing if the variable, or any future bindings to the variable, are
                 // used _after_ the loop.
-                let scope = checker.semantic().current_scope();
                 if scope
                     .get_all(name)
                     .map(|binding_id| checker.semantic().binding(binding_id))
