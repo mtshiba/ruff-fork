@@ -286,7 +286,11 @@ pub(crate) fn unused_import(checker: &Checker, scope: &Scope, diagnostics: &mut 
             continue;
         };
 
-        let binding_name = top_binding.name(checker.source()).split(".").next().unwrap_or("");
+        let binding_name = top_binding
+            .name(checker.source())
+            .split(".")
+            .next()
+            .unwrap_or("");
 
         for binding in scope
             .get_all(&binding_name.nfkc().collect::<String>())
@@ -294,8 +298,7 @@ pub(crate) fn unused_import(checker: &Checker, scope: &Scope, diagnostics: &mut 
         {
             let name = binding.name(checker.source());
 
-            if already_checked_imports.contains(name)
-            {
+            if already_checked_imports.contains(name) {
                 continue;
             }
             {
@@ -331,16 +334,13 @@ pub(crate) fn unused_import(checker: &Checker, scope: &Scope, diagnostics: &mut 
             }
 
             // If an import was marked as allowed, avoid treating it as unused.
-            if checker
-                .settings
-                .pyflakes
-                .allowed_unused_imports
-                .iter()
-                .any(|allowed_unused_import| {
-                    let allowed_unused_import = QualifiedName::from_dotted_name(allowed_unused_import);
+            if checker.settings.pyflakes.allowed_unused_imports.iter().any(
+                |allowed_unused_import| {
+                    let allowed_unused_import =
+                        QualifiedName::from_dotted_name(allowed_unused_import);
                     import.qualified_name().starts_with(&allowed_unused_import)
-                })
-            {
+                },
+            ) {
                 continue;
             }
 
