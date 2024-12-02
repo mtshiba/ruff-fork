@@ -75,6 +75,7 @@ Literal: _SpecialForm
 ```py
 from other import Literal
 
+# error: [annotation-with-invalid-expression]
 a1: Literal[26]
 
 def f():
