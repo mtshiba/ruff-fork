@@ -1002,6 +1002,7 @@ pub fn code_to_rule(linter: Linter, code: &str) -> Option<(RuleGroup, Rule)> {
         (Ruff, "047") => (RuleGroup::Preview, rules::ruff::rules::NeedlessElse),
         (Ruff, "048") => (RuleGroup::Preview, rules::ruff::rules::MapIntVersionParsing),
         (Ruff, "049") => (RuleGroup::Preview, rules::ruff::rules::DataclassEnum),
+        (Ruff, "050") => (RuleGroup::Preview, rules::ruff::rules::OperationOnClosedIO),
         (Ruff, "051") => (RuleGroup::Preview, rules::ruff::rules::IfKeyInDictDel),
         (Ruff, "052") => (RuleGroup::Preview, rules::ruff::rules::UsedDummyVariable),
         (Ruff, "055") => (RuleGroup::Preview, rules::ruff::rules::UnnecessaryRegularExpression),
