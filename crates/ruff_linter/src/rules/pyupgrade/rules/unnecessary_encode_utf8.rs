@@ -264,6 +264,10 @@ pub(crate) fn unnecessary_encode_utf8(checker: &Checker, call: &ast::ExprCall) {
     }
 }
 
+/// Returns `true` if the string contains escape characters that are only valid in string literals
+/// but not in bytes literals.
+///
+/// See [Escape sequences](https://docs.python.org/3/reference/lexical_analysis.html#escape-sequences)
 fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Locator) -> bool {
     for fragment in string {
         let flags = fragment.flags;
@@ -272,21 +276,18 @@ fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Lo
             continue;
         }
 
-        let total_len = fragment.end() - fragment.start();
+        let total_len = fragment.range().len();
         let value_len = total_len - flags.opener_len() - flags.closer_len();
 
         if value_len > fragment.as_str().text_len() {
-            return string_fragment_contains_string_only_escapes(fragment, locator);
+            return literal_contains_string_only_escapes(fragment, locator);
         }
     }
 
     false
 }
 
-fn string_fragment_contains_string_only_escapes(
-    fragment: &StringLiteral,
-    locator: &Locator,
-) -> bool {
+fn literal_contains_string_only_escapes(fragment: &StringLiteral, locator: &Locator) -> bool {
     let flags = fragment.flags;
 
     let inner_start = fragment.start() + flags.opener_len();
