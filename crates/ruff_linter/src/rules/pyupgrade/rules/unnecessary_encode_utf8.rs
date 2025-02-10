@@ -1,8 +1,11 @@
 use ruff_diagnostics::{AlwaysFixableViolation, Diagnostic, Edit, Fix};
 use ruff_macros::{derive_message_formats, ViolationMetadata};
-use ruff_python_ast::{self as ast, Arguments, Expr, Keyword};
+use ruff_python_ast::{
+    self as ast, Arguments, Expr, Keyword, StringFlags, StringLiteral, StringLiteralValue,
+};
 use ruff_python_parser::{TokenKind, Tokens};
-use ruff_text_size::{Ranged, TextRange};
+use ruff_python_trivia::Cursor;
+use ruff_text_size::{Ranged, TextLen, TextRange};
 
 use crate::checkers::ast::Checker;
 use crate::fix::edits::{pad, remove_argument, Parentheses};
@@ -154,6 +157,10 @@ pub(crate) fn unnecessary_encode_utf8(checker: &Checker, call: &ast::ExprCall) {
     };
     match variable {
         Expr::StringLiteral(ast::ExprStringLiteral { value: literal, .. }) => {
+            if string_contains_string_only_escapes(literal, checker.locator()) {
+                return;
+            }
+
             // Ex) `"str".encode()`, `"str".encode("utf-8")`
             if let Some(encoding_arg) = match_encoding_arg(&call.arguments) {
                 if literal.to_str().is_ascii() {
@@ -255,4 +262,79 @@ pub(crate) fn unnecessary_encode_utf8(checker: &Checker, call: &ast::ExprCall) {
         }
         _ => {}
     }
+}
+
+fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Locator) -> bool {
+    for fragment in string {
+        let flags = fragment.flags;
+
+        if flags.prefix().is_raw() {
+            continue;
+        }
+
+        let total_len = fragment.end() - fragment.start();
+        let value_len = total_len - flags.opener_len() - flags.closer_len();
+
+        if value_len > fragment.as_str().text_len() {
+            return string_fragment_contains_string_only_escapes(fragment, locator);
+        }
+    }
+
+    false
+}
+
+fn string_fragment_contains_string_only_escapes(
+    fragment: &StringLiteral,
+    locator: &Locator,
+) -> bool {
+    let flags = fragment.flags;
+
+    let inner_start = fragment.start() + flags.opener_len();
+    let inner_end = fragment.end() - flags.closer_len();
+    let inner_in_source = locator.slice(TextRange::new(inner_start, inner_end));
+
+    let mut cursor = Cursor::new(inner_in_source);
+    let mut escaped = true;
+
+    while let Some(char) = cursor.bump() {
+        if !escaped && char != '\\' {
+            continue;
+        }
+
+        if char == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        match char {
+            'N' | 'u' | 'U' => return true,
+            'x' => {
+                cursor.skip_bytes(2);
+            }
+            '0'..'7' => {
+                let (second, third) = (cursor.first(), cursor.second());
+
+                let octal_codepoint = match (is_octal_digit(second), is_octal_digit(third)) {
+                    (false, _) => char.to_string(),
+                    (true, false) => format!("{char}{second}"),
+                    (true, true) => format!("{char}{second}{third}"),
+                };
+
+                if octal_codepoint.parse::<u8>().is_err() {
+                    return true;
+                };
+
+                cursor.skip_bytes(octal_codepoint.len());
+            }
+            _ => {}
+        }
+
+        escaped = false;
+    }
+
+    false
+}
+
+const fn is_octal_digit(char: char) -> bool {
+    matches!(char, '0'..'7')
 }
