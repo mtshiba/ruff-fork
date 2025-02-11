@@ -113,6 +113,8 @@ x: '"foo".encode("utf-8")'
 '\\a'.encode()
 'a\\\b'.encode()
 
+'\\ u0000 '.encode()
+
 
 ## No errors
 "\N{DIGIT ONE}".encode()
@@ -120,3 +122,6 @@ x: '"foo".encode("utf-8")'
 "\U00000031".encode()
 
 '\477'.encode()
+
+"\
+" "\u0001".encode()

@@ -264,10 +264,25 @@ pub(crate) fn unnecessary_encode_utf8(checker: &Checker, call: &ast::ExprCall) {
     }
 }
 
-/// Returns `true` if the string contains escape characters that are only valid in string literals
-/// but not in bytes literals.
+/// In a string, there are two kinds of escape sequences: "single" and "multi".
 ///
-/// See [Escape sequences](https://docs.python.org/3/reference/lexical_analysis.html#escape-sequences)
+/// A "single" escape sequence is formed if a backslash is followed by
+/// a newline, another backslash, `'`, `"`, `a`, `b`, `f`, `n`, `t`, or `v`.
+/// A "multi" escape sequence is formed if a backslash is followed by
+/// `x` and 2 hex digits, `N` and a Unicode character name enclosed in a pair of braces,
+/// `u` and 4 hex digits, `U` and 8 hex digits, or 1 to 3 oct digits.
+///
+/// Out of the aforementioned, `u`, `U` and `N` are only valid in a string.
+/// However, an octal escape `\ooo` where `ooo` is greater than 377 base 8
+/// currently raises a `SyntaxWarning` (will eventually be a `SyntaxError`)
+/// in both strings and bytes and thus is not considered `bytes`-compatible.
+///
+/// An unrecognized escape sequence is ignored, resulting in both
+/// the backslash and the following character being part of the string.
+///
+/// Reference: [Lexical analysis &sect; 2.4.1.1. Escape sequences][escape-sequences]
+///
+/// [escape-sequences]: https://docs.python.org/3/reference/lexical_analysis.html#escape-sequences
 fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Locator) -> bool {
     for fragment in string {
         let flags = fragment.flags;
@@ -276,11 +291,10 @@ fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Lo
             continue;
         }
 
-        let total_len = fragment.range().len();
-        let value_len = total_len - flags.opener_len() - flags.closer_len();
-
-        if value_len > fragment.as_str().text_len() {
-            return literal_contains_string_only_escapes(fragment, locator);
+        if fragment.content_range().len() > fragment.as_str().text_len() {
+            if literal_contains_string_only_escapes(fragment, locator) {
+                return true;
+            }
         }
     }
 
@@ -288,26 +302,18 @@ fn string_contains_string_only_escapes(string: &StringLiteralValue, locator: &Lo
 }
 
 fn literal_contains_string_only_escapes(fragment: &StringLiteral, locator: &Locator) -> bool {
-    let flags = fragment.flags;
-
-    let inner_start = fragment.start() + flags.opener_len();
-    let inner_end = fragment.end() - flags.closer_len();
-    let inner_in_source = locator.slice(TextRange::new(inner_start, inner_end));
+    let inner_in_source = locator.slice(fragment.content_range());
 
     let mut cursor = Cursor::new(inner_in_source);
-    let mut escaped = true;
 
-    while let Some(char) = cursor.bump() {
-        if !escaped && char != '\\' {
+    while let Some(backslash_offset) = memchr::memchr(b'\\', cursor.as_bytes()) {
+        cursor.skip_bytes(backslash_offset + "\\".len());
+
+        let Some(escaped) = cursor.bump() else {
             continue;
-        }
+        };
 
-        if char == '\\' {
-            escaped = true;
-            continue;
-        }
-
-        match char {
+        match escaped {
             'N' | 'u' | 'U' => return true,
             'x' => {
                 cursor.skip_bytes(2);
@@ -316,9 +322,9 @@ fn literal_contains_string_only_escapes(fragment: &StringLiteral, locator: &Loca
                 let (second, third) = (cursor.first(), cursor.second());
 
                 let octal_codepoint = match (is_octal_digit(second), is_octal_digit(third)) {
-                    (false, _) => char.to_string(),
-                    (true, false) => format!("{char}{second}"),
-                    (true, true) => format!("{char}{second}{third}"),
+                    (false, _) => escaped.to_string(),
+                    (true, false) => format!("{escaped}{second}"),
+                    (true, true) => format!("{escaped}{second}{third}"),
                 };
 
                 if octal_codepoint.parse::<u8>().is_err() {
@@ -329,8 +335,6 @@ fn literal_contains_string_only_escapes(fragment: &StringLiteral, locator: &Loca
             }
             _ => {}
         }
-
-        escaped = false;
     }
 
     false

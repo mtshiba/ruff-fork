@@ -895,13 +895,15 @@ UP012.py:113:1: UP012 [*] Unnecessary call to `encode` as UTF-8
     113 |+b'\\a'
 114 114 | 'a\\\b'.encode()
 115 115 | 
-116 116 | 
+116 116 | '\\ u0000 '.encode()
 
 UP012.py:114:1: UP012 [*] Unnecessary call to `encode` as UTF-8
     |
 113 | '\\a'.encode()
 114 | 'a\\\b'.encode()
     | ^^^^^^^^^^^^^^^^ UP012
+115 |
+116 | '\\ u0000 '.encode()
     |
     = help: Rewrite as bytes literal
 
@@ -912,5 +914,24 @@ UP012.py:114:1: UP012 [*] Unnecessary call to `encode` as UTF-8
 114     |-'a\\\b'.encode()
     114 |+b'a\\\b'
 115 115 | 
-116 116 | 
-117 117 | ## No errors
+116 116 | '\\ u0000 '.encode()
+117 117 | 
+
+UP012.py:116:1: UP012 [*] Unnecessary call to `encode` as UTF-8
+    |
+114 | 'a\\\b'.encode()
+115 |
+116 | '\\ u0000 '.encode()
+    | ^^^^^^^^^^^^^^^^^^^^ UP012
+    |
+    = help: Rewrite as bytes literal
+
+ℹ Safe fix
+113 113 | '\\a'.encode()
+114 114 | 'a\\\b'.encode()
+115 115 | 
+116     |-'\\ u0000 '.encode()
+    116 |+b'\\ u0000 '
+117 117 | 
+118 118 | 
+119 119 | ## No errors
