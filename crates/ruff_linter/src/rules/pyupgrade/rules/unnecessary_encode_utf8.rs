@@ -1,8 +1,6 @@
 use ruff_diagnostics::{AlwaysFixableViolation, Diagnostic, Edit, Fix};
 use ruff_macros::{derive_message_formats, ViolationMetadata};
-use ruff_python_ast::{
-    self as ast, Arguments, Expr, Keyword, StringFlags, StringLiteral, StringLiteralValue,
-};
+use ruff_python_ast::{self as ast, Arguments, Expr, Keyword, StringLiteral, StringLiteralValue};
 use ruff_python_parser::{TokenKind, Tokens};
 use ruff_python_trivia::Cursor;
 use ruff_text_size::{Ranged, TextLen, TextRange};
