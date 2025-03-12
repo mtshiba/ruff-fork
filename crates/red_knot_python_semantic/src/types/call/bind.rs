@@ -128,8 +128,12 @@ fn bind_overload<'db>(
                 first_excess_argument_index,
                 num_synthetic_args,
             ),
-            expected_positional_count: parameters.positional().count(),
-            provided_positional_count: next_positional,
+            expected_positional_count: parameters
+                .positional()
+                .count()
+                // using saturating_sub to avoid negative values due to invalid syntax in source code
+                .saturating_sub(num_synthetic_args),
+            provided_positional_count: next_positional.saturating_sub(num_synthetic_args),
         });
     }
     let mut missing = vec![];
@@ -224,6 +228,12 @@ impl<'db> CallBinding<'db> {
             .iter_mut()
             .enumerate()
             .find(|(_, overload)| !overload.has_binding_errors())
+    }
+
+    pub(crate) fn set_return_type(&mut self, return_ty: Type<'db>) {
+        for overload in self.overloads.iter_mut() {
+            overload.set_return_type(return_ty);
+        }
     }
 
     /// Returns the return type of this call. For a valid call, this is the return type of the

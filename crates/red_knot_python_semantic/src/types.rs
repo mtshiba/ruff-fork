@@ -2846,11 +2846,87 @@ impl<'db> Type<'db> {
             }
 
             // TODO annotated return type on `__new__` or metaclass `__call__`
-            // TODO check call vs signatures of `__new__` and/or `__init__`
-            Type::ClassLiteral(ClassLiteralType { .. }) => {
-                let signature = Signature::new(Parameters::gradual_form(), self.to_instance(db));
-                let binding = bind_call(db, arguments, &signature.into(), self);
-                binding.into_outcome()
+            Type::ClassLiteral(ClassLiteralType { class }) => {
+                // User defined or known class not handled by the above cases
+                let instance_ty = Type::Instance(InstanceType { class });
+
+                // As of now we do not model custom `__call__` on meta-classes, so the code below
+                // only deals with interplay between `__new__` and `__init__` methods.
+                // The logic is roughly as follows:
+                // 1. If `__new__` is defined anywhere in the MRO (except for `object`, since it is always
+                //    present), we call it, analyze outcome and stop. There is no need to try binding
+                //    `__init__` in this case, since any signature mismatches should be handled at definition
+                //    site of the class.
+                // 2. If `__new__` is not found, we try to call `__init__`. Here, we allow it to fallback all
+                //    the way to `object` (single argument call). This matches runtime behavior,
+                //    where `object.__init__` would only allow >=1 arguments if `__new__` is explicitly defined.
+                //
+                // Note that we currently ignore `__new__` return type, since we do not support `Self`
+                // and most builtin classes use it as return type annotation. We always return the instance type.
+
+                // First check if there is a `__new__` method anywhere in MRO except for `object`.
+                let check_call_outcome =
+                    if class.class_member(db, "__new__", false).symbol.is_unbound() {
+                        // No explicit `__new__` method found, try calling `__init__` on instance.
+                        instance_ty.try_call_dunder(db, "__init__", arguments)
+                    } else {
+                        // Explicit `__new__` method found, call it and return the result.
+                        self.try_call_dunder(db, "__new__", arguments)
+                    };
+
+                // Try calling __init__ to check arguments before returning the instance type
+                match check_call_outcome {
+                    Err(CallDunderError::Call(mut error)) => {
+                        // If the call to `__init__` fails we want to return inner error directly
+                        // but ensure that the fallback return type is the instance type.
+
+                        match error {
+                            CallError::NotCallable { .. } => {
+                                // Instead of trying to emit a diagnostic at call site, these should be
+                                // caught at the definition site of the class. Here we return Ok with the
+                                // instance type to ensure that the return type is correct.
+                                let fallback_signature =
+                                    Signature::new(Parameters::gradual_form(), Some(instance_ty));
+                                let fallback_binding =
+                                    bind_call(db, arguments, &fallback_signature.into(), self);
+
+                                fallback_binding.into_outcome()
+                            }
+                            CallError::PossiblyUnboundDunderCall { .. }
+                            | CallError::Union(_)
+                            | CallError::BindingError { .. } => {
+                                // Replace the return type and return as Err
+                                error.set_return_type(instance_ty);
+                                Err(error)
+                            }
+                        }
+                    }
+                    // If we are using vendored typeshed, it should be impossible to have missing
+                    // or unbound `__init__` methods on classes, as all classes have `object` in MRO.
+                    // Thus the following two arms will only trigger if a custom typeshed is used.
+                    Err(CallDunderError::PossiblyUnbound(mut outcome)) => {
+                        outcome.set_return_type(instance_ty);
+                        Ok(outcome)
+                    }
+                    Err(CallDunderError::MethodNotAvailable) => {
+                        // Fallback by explicitly checking against a sudo init signature without arguments.
+                        // We do not mimic `self`, since we using `bind_call` directly and thus do not go through
+                        // method binding machinery that injects `self`. We also fake return type as being
+                        // the instance type to get the expected `CallOutcome` directly.
+                        let fallback_signature =
+                            Signature::new(Parameters::new([]), Some(instance_ty));
+                        let fallback_binding =
+                            bind_call(db, arguments, &fallback_signature.into(), self);
+
+                        fallback_binding.into_outcome()
+                    }
+                    // If the call to `__new__`/`__init__` is successful, we need to emit the resulting
+                    // binding but replace the return type with instance type.
+                    Ok(mut outcome) => {
+                        outcome.set_return_type(instance_ty);
+                        Ok(outcome)
+                    }
+                }
             }
 
             Type::SubclassOf(subclass_of_type) => match subclass_of_type.subclass_of() {

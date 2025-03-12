@@ -2413,7 +2413,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             Type::Instance(instance) => {
                 if let Symbol::Type(class_member, boundness) = instance
                     .class()
-                    .class_member(self.db(), op.in_place_dunder())
+                    .class_member(self.db(), op.in_place_dunder(), true)
                     .symbol
                 {
                     let call = class_member.try_call(
@@ -5138,7 +5138,7 @@ impl<'db> TypeInferenceBuilder<'db> {
     ) -> Result<Type<'db>, CompareUnsupportedError<'db>> {
         let db = self.db();
 
-        let contains_dunder = right.class().class_member(db, "__contains__").symbol;
+        let contains_dunder = right.class().class_member(db, "__contains__", true).symbol;
         let compare_result_opt = match contains_dunder {
             Symbol::Type(contains_dunder, Boundness::Bound) => {
                 // If `__contains__` is available, it is used directly for the membership test.
