@@ -70,10 +70,7 @@ type Falsy = Not[AlwaysTruthy]
 
 type AmbiguousTruthiness = Intersection[Truthy, Falsy]
 
-# TODO: Both of these should be true
-# error: [static-assert-error]
 static_assert(is_disjoint_from(AlwaysTruthy, AmbiguousTruthiness))
-# error: [static-assert-error]
 static_assert(is_disjoint_from(AlwaysFalsy, AmbiguousTruthiness))
 
 class CustomAmbiguousTruthinessType:

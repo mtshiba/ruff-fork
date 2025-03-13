@@ -58,7 +58,7 @@ def raises_unconditionally() -> Never:
 def exits_unconditionally() -> Never:
     import sys
 
-    sys.exit(1)
+    return sys.exit(1)
 
 def loops_forever() -> Never:
     while True:
@@ -72,7 +72,8 @@ Similarly, if `Never` is used in parameter positions, it indicates that the func
 called, because it can never be passed a value of type `Never` (there are none):
 
 ```py
-def can_not_be_called(n: Never) -> int: ...
+def can_not_be_called(n: Never) -> int:
+    return 0
 ```
 
 ## `Never` is disjoint from every other type

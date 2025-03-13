@@ -13,10 +13,7 @@ from knot_extensions import Not, static_assert, is_disjoint_from
 class T: ...
 class S(T): ...
 
-# TODO: These should succeed
-# error: [static-assert-error]
 static_assert(is_disjoint_from(Not[T], T))
-# error: [static-assert-error]
 static_assert(is_disjoint_from(Not[T], S))
 ```
 
@@ -54,8 +51,6 @@ class S(T): ...
 static_assert(is_assignable_to(S, T))
 static_assert(is_assignable_to(Not[T], Not[S]))
 
-# TODO: This should be true
-# error: [static-assert-error]
 static_assert(is_assignable_to(Intersection[Any, S], Intersection[Any, T]))
 
 static_assert(is_assignable_to(Not[Intersection[Any, S]], Not[Intersection[Any, T]]))

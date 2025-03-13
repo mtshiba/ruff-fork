@@ -91,10 +91,7 @@ class Big: ...
 class Medium(Big): ...
 class Small(Medium): ...
 
-# TODO: The following two assertions should not fail (https://github.com/astral-sh/ruff/issues/14899)
-# error: [static-assert-error]
 static_assert(is_assignable_to(Small, Intersection[Any, Medium]))
-# error: [static-assert-error]
 static_assert(is_assignable_to(Medium, Intersection[Any, Medium]))
 ```
 
