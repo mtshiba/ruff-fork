@@ -30,7 +30,7 @@ use crate::semantic_index::symbol::ScopeId;
 use crate::semantic_index::{imported_modules, semantic_index};
 use crate::suppression::check_suppressions;
 use crate::symbol::{imported_symbol, Boundness, Symbol, SymbolAndQualifiers};
-use crate::types::call::{bind_call, CallArguments, CallOutcome, UnionCallError};
+use crate::types::call::{bind_call, CallArguments, CallOutcome, OverloadBinding, UnionCallError};
 use crate::types::class_base::ClassBase;
 use crate::types::diagnostic::{INVALID_TYPE_FORM, UNSUPPORTED_BOOL_CONVERSION};
 use crate::types::infer::infer_unpack_types;
@@ -2850,6 +2850,19 @@ impl<'db> Type<'db> {
                 // User defined or known class not handled by the above cases
                 let instance_ty = Type::Instance(InstanceType { class });
 
+                // As of today the only public API to create a binding is through `bind_call`.
+                // Thus we create a "accept anything" signature to get the basic biding with
+                // the correct return type. We then model what actually happens during instance
+                // creation by calling `__new__` or `__init__` (see below) and injecting errors, if any
+                let dummy_signature = Signature::new(Parameters::gradual_form(), Some(instance_ty));
+                let mut output_binding = bind_call(db, arguments, &dummy_signature.into(), self);
+
+                let Some((_, overload)) = output_binding.matching_overload_mut() else {
+                    unreachable!(
+                        "`bind_call` should always return a binding with a matching overload"
+                    );
+                };
+
                 // As of now we do not model custom `__call__` on meta-classes, so the code below
                 // only deals with interplay between `__new__` and `__init__` methods.
                 // The logic is roughly as follows:
@@ -2874,59 +2887,30 @@ impl<'db> Type<'db> {
                         self.try_call_dunder(db, "__new__", arguments)
                     };
 
-                // Try calling __init__ to check arguments before returning the instance type
-                match check_call_outcome {
-                    Err(CallDunderError::Call(mut error)) => {
-                        // If the call to `__init__` fails we want to return inner error directly
-                        // but ensure that the fallback return type is the instance type.
-
+                if let Err(CallDunderError::Call(ref error)) = check_call_outcome {
+                    // If the call fails we want to inject errors into the binding.
+                    fn extract_errors<'db>(
+                        error: &CallError<'db>,
+                        overload: &mut OverloadBinding<'db>,
+                    ) {
                         match error {
-                            CallError::NotCallable { .. } => {
-                                // Instead of trying to emit a diagnostic at call site, these should be
-                                // caught at the definition site of the class. Here we return Ok with the
-                                // instance type to ensure that the return type is correct.
-                                let fallback_signature =
-                                    Signature::new(Parameters::gradual_form(), Some(instance_ty));
-                                let fallback_binding =
-                                    bind_call(db, arguments, &fallback_signature.into(), self);
-
-                                fallback_binding.into_outcome()
+                            CallError::Union(UnionCallError { errors, .. }) => {
+                                errors.into_iter().for_each(|error| {
+                                    extract_errors(error, overload);
+                                });
                             }
-                            CallError::PossiblyUnboundDunderCall { .. }
-                            | CallError::Union(_)
-                            | CallError::BindingError { .. } => {
-                                // Replace the return type and return as Err
-                                error.set_return_type(instance_ty);
-                                Err(error)
+                            CallError::BindingError { binding } => {
+                                overload.extend_errors(binding.errors());
                             }
+                            CallError::NotCallable { .. } => {}
+                            CallError::PossiblyUnboundDunderCall { .. } => {}
                         }
                     }
-                    // If we are using vendored typeshed, it should be impossible to have missing
-                    // or unbound `__init__` methods on classes, as all classes have `object` in MRO.
-                    // Thus the following two arms will only trigger if a custom typeshed is used.
-                    Err(CallDunderError::PossiblyUnbound(mut outcome)) => {
-                        outcome.set_return_type(instance_ty);
-                        Ok(outcome)
-                    }
-                    Err(CallDunderError::MethodNotAvailable) => {
-                        // Fallback by explicitly checking against a sudo init signature without arguments.
-                        // We do not mimic `self`, since we using `bind_call` directly and thus do not go through
-                        // method binding machinery that injects `self`. We also fake return type as being
-                        // the instance type to get the expected `CallOutcome` directly.
-                        let fallback_signature =
-                            Signature::new(Parameters::new([]), Some(instance_ty));
-                        let fallback_binding =
-                            bind_call(db, arguments, &fallback_signature.into(), self);
 
-                        fallback_binding.into_outcome()
-                    }
-                    // If the call to `__new__`/`__init__` is successful, we need to emit the resulting
-                    // binding but replace the return type with instance type.
-                    Ok(mut outcome) => {
-                        outcome.set_return_type(instance_ty);
-                        Ok(outcome)
-                    }
+                    extract_errors(error, overload);
                 }
+
+                output_binding.into_outcome()
             }
 
             Type::SubclassOf(subclass_of_type) => match subclass_of_type.subclass_of() {

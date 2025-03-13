@@ -1,12 +1,14 @@
-# Temp
+# Constructor
+
+## Temp
 
 ```py
 from typing import Any
 
-reveal_type(type[Any])  # revealed: type[Any]
+def f(x: type[Any]):
+    reveal_type(x)  # revealed: type[Any]
+    reveal_type(x)  # revealed: Literal[type[Any]]
 ```
-
-## Constructor
 
 ## No init or new
 
