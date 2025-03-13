@@ -1,4 +1,12 @@
-# Constructor
+# Temp
+
+```py
+from typing import Any
+
+reveal_type(type[Any])  # revealed: type[Any]
+```
+
+## Constructor
 
 ## No init or new
 

@@ -231,7 +231,7 @@ impl<'db> CallBinding<'db> {
     }
 
     pub(crate) fn set_return_type(&mut self, return_ty: Type<'db>) {
-        for overload in self.overloads.iter_mut() {
+        for overload in &mut self.overloads {
             overload.set_return_type(return_ty);
         }
     }

@@ -2858,7 +2858,7 @@ impl<'db> Type<'db> {
                 //    `__init__` in this case, since any signature mismatches should be handled at definition
                 //    site of the class.
                 // 2. If `__new__` is not found, we try to call `__init__`. Here, we allow it to fallback all
-                //    the way to `object` (single argument call). This matches runtime behavior,
+                //    the way to `object` (single `self` argument call). This matches runtime behavior,
                 //    where `object.__init__` would only allow >=1 arguments if `__new__` is explicitly defined.
                 //
                 // Note that we currently ignore `__new__` return type, since we do not support `Self`
