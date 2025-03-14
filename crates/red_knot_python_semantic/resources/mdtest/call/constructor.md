@@ -20,13 +20,14 @@ If the class has an `__new__` method, we can infer the signature of the construc
 
 ```py
 class Foo:
-    def __new__(cls, x: int) -> "Foo": ...
+    def __new__(cls, x: int) -> "Foo":
+        return object.__new__(cls)
 
 reveal_type(Foo(1))  # revealed: Foo
 
-# error: [missing-argument] "No argument provided for required parameter `x` of bound method `__new__`"
+# error: [missing-argument] "No argument provided for required parameter `x` of function `__new__`"
 reveal_type(Foo())  # revealed: Foo
-# error: [too-many-positional-arguments] "Too many positional arguments to bound method `__new__`: expected 1, got 2"
+# error: [too-many-positional-arguments] "Too many positional arguments to function `__new__`: expected 1, got 2"
 reveal_type(Foo(1, 2))  # revealed: Foo
 ```
 
@@ -45,9 +46,9 @@ class Foo(Base): ...
 
 reveal_type(Foo(1))  # revealed: Foo
 
-# error: [missing-argument] "No argument provided for required parameter `x` of bound method `__new__`"
+# error: [missing-argument] "No argument provided for required parameter `x` of function `__new__`"
 reveal_type(Foo())  # revealed: Foo
-# error: [too-many-positional-arguments] "Too many positional arguments to bound method `__new__`: expected 1, got 2"
+# error: [too-many-positional-arguments] "Too many positional arguments to function `__new__`: expected 1, got 2"
 reveal_type(Foo(1, 2))  # revealed: Foo
 ```
 
@@ -57,14 +58,14 @@ reveal_type(Foo(1, 2))  # revealed: Foo
 def _(flag: bool) -> None:
     class Foo:
         if flag:
-            def __new__(cls, x: int) -> "Foo": ...
+            def __new__(cls, x: int): ...
         else:
             def __new__(cls, x: int, y: int = 1): ...
 
     reveal_type(Foo(1))  # revealed: Foo
-    # error: [invalid-argument-type] "Object of type `Literal["1"]` cannot be assigned to parameter 2 (`x`) of bound method `__new__`; expected type `int`"
+    # error: [invalid-argument-type] "Object of type `Literal["1"]` cannot be assigned to parameter 2 (`x`) of function `__new__`; expected type `int`"
     reveal_type(Foo("1"))  # revealed: Foo
-    # error: [missing-argument] "No argument provided for required parameter `x` of bound method `__new__`"
+    # error: [missing-argument] "No argument provided for required parameter `x` of function `__new__`"
     reveal_type(Foo())  # revealed: Foo
 ```
 
@@ -72,13 +73,14 @@ def _(flag: bool) -> None:
 
 ```py
 class SomeCallable:
-    def __call__(self, cls, x: int) -> str:
+    def __call__(self, cls, x: int) -> "Foo":
         obj = object.__new__(cls)
         obj.x = x
         return obj
 
 class Descriptor:
     def __get__(self, instance, owner) -> SomeCallable:
+        print(instance, owner)
         return SomeCallable()
 
 class Foo:

@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use bitflags::bitflags;
 use call::{CallDunderError, CallError};
+use class::MroAttributeLookupPolicy;
 use context::InferContext;
 use diagnostic::{INVALID_CONTEXT_MANAGER, NOT_ITERABLE};
 use ruff_db::files::File;
@@ -2955,14 +2956,52 @@ impl<'db> Type<'db> {
                 // and most builtin classes use it as return type annotation. We always return the instance type.
 
                 // First check if there is a `__new__` method anywhere in MRO except for `object`.
-                let check_call_outcome =
-                    if class.class_member(db, "__new__", false).symbol.is_unbound() {
-                        // No explicit `__new__` method found, try calling `__init__` on instance.
-                        instance_ty.try_call_dunder(db, "__init__", arguments)
-                    } else {
-                        // Explicit `__new__` method found, call it and return the result.
-                        self.try_call_dunder(db, "__new__", arguments)
-                    };
+                let class_new = class
+                    .class_member(db, "__new__", MroAttributeLookupPolicy::NoObjectFallback)
+                    .symbol;
+
+                let check_call_outcome = if class_new.is_unbound() {
+                    // No explicit `__new__` method found, try calling `__init__` on instance.
+                    instance_ty.try_call_dunder(db, "__init__", arguments)
+                } else {
+                    // Run a full descriptor protocol lookup, and then call as a static method
+                    // injecting `self` as the first argument.
+                    let class_new_fallback = Self::try_call_dunder_get_on_attribute(
+                        db,
+                        class_new.with_qualifiers(TypeQualifiers::empty()),
+                        Type::none(db),
+                        self,
+                    )
+                    .0;
+
+                    match self
+                        .invoke_descriptor_protocol(
+                            db,
+                            "__new__",
+                            class_new_fallback,
+                            InstanceFallbackShadowsNonDataDescriptor::Yes,
+                        )
+                        .symbol
+                    {
+                        Symbol::Type(dunder_callbable, boundness) => {
+                            // Explicit `__new__` method found, call it and return the result.
+                            match dunder_callbable.try_call(db, &arguments.with_self(self)) {
+                                Ok(result) => {
+                                    if boundness == Boundness::Bound {
+                                        Ok(result)
+                                    } else {
+                                        Err(CallDunderError::PossiblyUnbound(result))
+                                    }
+                                }
+                                Err(err) => Err(CallDunderError::Call(err)),
+                            }
+                        }
+                        Symbol::Unbound => {
+                            // No explicit `__new__` method found, try calling `__init__` on instance.
+                            instance_ty.try_call_dunder(db, "__init__", arguments)
+                        }
+                    }
+                };
 
                 // Try calling __init__ to check arguments before returning the instance type
                 match check_call_outcome {
