@@ -87,6 +87,16 @@ fn inheritance_cycle_initial<'db>(_db: &'db dyn Db, _self: Class<'db>) -> Option
     None
 }
 
+/// When looking up an attribute on a class, we sometimes need to avoid
+/// looking up attributes defined on the `object` class.
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub(crate) enum MroAttributeLookupPolicy {
+    /// Exclude attributes defined on `object`
+    NoObjectFallback,
+    /// Look up all classes in MRO, including `object`
+    WithObjectFallback,
+}
+
 #[salsa::tracked]
 impl<'db> Class<'db> {
     /// Return `true` if this class represents `known_class`
@@ -378,7 +388,12 @@ impl<'db> Class<'db> {
     /// The member resolves to a member on the class itself or any of its proper superclasses.
     ///
     /// TODO: Should this be made private...?
-    pub(super) fn class_member(self, db: &'db dyn Db, name: &str) -> SymbolAndQualifiers<'db> {
+    pub(super) fn class_member(
+        self,
+        db: &'db dyn Db,
+        name: &str,
+        policy: MroAttributeLookupPolicy,
+    ) -> SymbolAndQualifiers<'db> {
         if name == "__mro__" {
             let tuple_elements = self.iter_mro(db).map(Type::from);
             return Symbol::bound(TupleType::from_elements(db, tuple_elements)).into();
@@ -409,6 +424,13 @@ impl<'db> Class<'db> {
                     dynamic_type_to_intersect_with.get_or_insert(Type::from(superclass));
                 }
                 ClassBase::Class(class) => {
+                    if class.is_known(db, KnownClass::Object)
+                        // Only exclude `object` members if this is not an `object` class itself
+                        && (policy == MroAttributeLookupPolicy::NoObjectFallback && !self.is_known(db, KnownClass::Object))
+                    {
+                        continue;
+                    }
+
                     lookup_result = lookup_result.or_else(|lookup_error| {
                         lookup_error.or_fall_back_to(db, class.own_class_member(db, name))
                     });
@@ -788,7 +810,8 @@ impl<'db> ClassLiteralType<'db> {
     }
 
     pub(super) fn class_member(self, db: &'db dyn Db, name: &str) -> SymbolAndQualifiers<'db> {
-        self.class.class_member(db, name)
+        self.class
+            .class_member(db, name, MroAttributeLookupPolicy::WithObjectFallback)
     }
 }
 

@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use bitflags::bitflags;
 use call::{CallDunderError, CallError};
+use class::MroAttributeLookupPolicy;
 use context::InferContext;
 use diagnostic::{INVALID_CONTEXT_MANAGER, NOT_ITERABLE};
 use ruff_db::files::File;
@@ -2845,12 +2846,216 @@ impl<'db> Type<'db> {
                 binding.into_outcome()
             }
 
-            // TODO annotated return type on `__new__` or metaclass `__call__`
-            // TODO check call vs signatures of `__new__` and/or `__init__`
-            Type::ClassLiteral(ClassLiteralType { .. }) => {
-                let signature = Signature::new(Parameters::gradual_form(), self.to_instance(db));
-                let binding = bind_call(db, arguments, &signature.into(), self);
+            // TODO: currently we can't use typeshed to infer calls using generic
+            // logic below due to a salsa query cycle. When this is fixed, we should
+            // this arm and aboid special casing `TypeVar` in the `ClassLiteral` arm.
+            Type::ClassLiteral(ClassLiteralType { class })
+                if class.is_known(db, KnownClass::TypeVar) =>
+            {
+                // TODO: signature depends on Python version, using 3.11 for now
+                // ```py
+                // class TypeVar:
+                //     elif sys.version_info >= (3, 11):
+                //        def __new__(
+                //            cls, name: str, *constraints: Any, bound: Any | None = None, covariant: bool = False,
+                //            contravariant: bool = False
+                //        ) -> Self: ...None: ...
+                // ```
+                #[salsa::tracked(return_ref)]
+                fn overloads<'db>(db: &'db dyn Db) -> CallableSignature<'db> {
+                    CallableSignature::from_overloads([Signature::new(
+                        Parameters::new([
+                            Parameter::new(
+                                Some(Name::new_static("name")),
+                                Some(KnownClass::Str.to_instance(db)),
+                                ParameterKind::PositionalOnly { default_ty: None },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("constraints")),
+                                Some(Type::any()),
+                                ParameterKind::Variadic {},
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("bound")),
+                                Some(Type::any()),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::none(db)),
+                                },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("covariant")),
+                                Some(KnownClass::Bool.to_instance(db)),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::BooleanLiteral(false)),
+                                },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("contravariant")),
+                                Some(KnownClass::Bool.to_instance(db)),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::BooleanLiteral(false)),
+                                },
+                            ),
+                        ]),
+                        Some(KnownClass::TypeVar.to_instance(db)),
+                    )])
+                }
+
+                let mut binding = bind_call(db, arguments, overloads(db), self);
+                if binding.matching_overload_mut().is_none() {
+                    return Err(CallError::BindingError { binding });
+                };
+
                 binding.into_outcome()
+            }
+
+            // TODO: currently we can't use typeshed to infer calls using generic
+            // logic below due to a salsa query cycle. When this is fixed, we should
+            // this arm and aboid special casing `Object` in the `ClassLiteral` arm.
+            Type::ClassLiteral(ClassLiteralType { class })
+                if class.is_known(db, KnownClass::Object) =>
+            {
+                // ```py
+                // class object:
+                //    def __init__(self) -> None: ...
+                //    def __new__(cls) -> Self: ...
+                // ```
+                #[salsa::tracked(return_ref)]
+                fn overloads<'db>(db: &'db dyn Db) -> CallableSignature<'db> {
+                    CallableSignature::from_overloads([Signature::new(
+                        Parameters::new([]),
+                        Some(KnownClass::Object.to_instance(db)),
+                    )])
+                }
+
+                let mut binding = bind_call(db, arguments, overloads(db), self);
+                if binding.matching_overload_mut().is_none() {
+                    return Err(CallError::BindingError { binding });
+                };
+
+                binding.into_outcome()
+            }
+
+            // TODO annotated return type on `__new__` or metaclass `__call__`
+            Type::ClassLiteral(ClassLiteralType { class }) => {
+                // User defined or known class not handled by the above cases
+                let instance_ty = Type::Instance(InstanceType { class });
+
+                // As of now we do not model custom `__call__` on meta-classes, so the code below
+                // only deals with interplay between `__new__` and `__init__` methods.
+                // The logic is roughly as follows:
+                // 1. If `__new__` is defined anywhere in the MRO (except for `object`, since it is always
+                //    present), we call it, analyze outcome and stop. There is no need to try binding
+                //    `__init__` in this case, since any signature mismatches should be handled at definition
+                //    site of the class.
+                // 2. If `__new__` is not found, we try to call `__init__`. Here, we allow it to fallback all
+                //    the way to `object` (single `self` argument call). This matches runtime behavior,
+                //    where `object.__init__` would only allow >=1 arguments if `__new__` is explicitly defined.
+                //
+                // Note that we currently ignore `__new__` return type, since we do not support `Self`
+                // and most builtin classes use it as return type annotation. We always return the instance type.
+
+                // First check if there is a `__new__` method anywhere in MRO except for `object`.
+                let class_new = class
+                    .class_member(db, "__new__", MroAttributeLookupPolicy::NoObjectFallback)
+                    .symbol;
+
+                let check_call_outcome = if class_new.is_unbound() {
+                    // No explicit `__new__` method found, try calling `__init__` on instance.
+                    instance_ty.try_call_dunder(db, "__init__", arguments)
+                } else {
+                    // Run a full descriptor protocol lookup, and then call as a static method
+                    // injecting `self` as the first argument.
+                    let class_new_fallback = Self::try_call_dunder_get_on_attribute(
+                        db,
+                        class_new.with_qualifiers(TypeQualifiers::empty()),
+                        Type::none(db),
+                        self,
+                    )
+                    .0;
+
+                    match self
+                        .invoke_descriptor_protocol(
+                            db,
+                            "__new__",
+                            class_new_fallback,
+                            InstanceFallbackShadowsNonDataDescriptor::Yes,
+                        )
+                        .symbol
+                    {
+                        Symbol::Type(dunder_callbable, boundness) => {
+                            // Explicit `__new__` method found, call it and return the result.
+                            match dunder_callbable.try_call(db, &arguments.with_self(self)) {
+                                Ok(result) => {
+                                    if boundness == Boundness::Bound {
+                                        Ok(result)
+                                    } else {
+                                        Err(CallDunderError::PossiblyUnbound(result))
+                                    }
+                                }
+                                Err(err) => Err(CallDunderError::Call(err)),
+                            }
+                        }
+                        Symbol::Unbound => {
+                            // No explicit `__new__` method found, try calling `__init__` on instance.
+                            instance_ty.try_call_dunder(db, "__init__", arguments)
+                        }
+                    }
+                };
+
+                // Try calling __init__ to check arguments before returning the instance type
+                match check_call_outcome {
+                    Err(CallDunderError::Call(mut error)) => {
+                        // If the call to `__init__` fails we want to return inner error directly
+                        // but ensure that the fallback return type is the instance type.
+
+                        match error {
+                            CallError::NotCallable { .. } => {
+                                // Instead of trying to emit a diagnostic at call site, these should be
+                                // caught at the definition site of the class. Here we return Ok with the
+                                // instance type to ensure that the return type is correct.
+                                let fallback_signature =
+                                    Signature::new(Parameters::gradual_form(), Some(instance_ty));
+                                let fallback_binding =
+                                    bind_call(db, arguments, &fallback_signature.into(), self);
+
+                                fallback_binding.into_outcome()
+                            }
+                            CallError::PossiblyUnboundDunderCall { .. }
+                            | CallError::Union(_)
+                            | CallError::BindingError { .. } => {
+                                // Replace the return type and return as Err
+                                error.set_return_type(instance_ty);
+                                Err(error)
+                            }
+                        }
+                    }
+                    // If we are using vendored typeshed, it should be impossible to have missing
+                    // or unbound `__init__` methods on classes, as all classes have `object` in MRO.
+                    // Thus the following two arms will only trigger if a custom typeshed is used.
+                    Err(CallDunderError::PossiblyUnbound(mut outcome)) => {
+                        outcome.set_return_type(instance_ty);
+                        Ok(outcome)
+                    }
+                    Err(CallDunderError::MethodNotAvailable) => {
+                        // Fallback by explicitly checking against a sudo init signature without arguments.
+                        // We do not mimic `self`, since we using `bind_call` directly and thus do not go through
+                        // method binding machinery that injects `self`. We also fake return type as being
+                        // the instance type to get the expected `CallOutcome` directly.
+                        let fallback_signature =
+                            Signature::new(Parameters::new([]), Some(instance_ty));
+                        let fallback_binding =
+                            bind_call(db, arguments, &fallback_signature.into(), self);
+
+                        fallback_binding.into_outcome()
+                    }
+                    // If the call to `__new__`/`__init__` is successful, we need to emit the resulting
+                    // binding but replace the return type with instance type.
+                    Ok(mut outcome) => {
+                        outcome.set_return_type(instance_ty);
+                        Ok(outcome)
+                    }
+                }
             }
 
             Type::SubclassOf(subclass_of_type) => match subclass_of_type.subclass_of() {
