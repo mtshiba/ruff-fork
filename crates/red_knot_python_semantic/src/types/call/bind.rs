@@ -230,6 +230,12 @@ impl<'db> CallBinding<'db> {
             .find(|(_, overload)| !overload.has_binding_errors())
     }
 
+    pub(crate) fn set_return_type(&mut self, return_ty: Type<'db>) {
+        for overload in &mut self.overloads {
+            overload.set_return_type(return_ty);
+        }
+    }
+
     /// Returns the return type of this call. For a valid call, this is the return type of the
     /// overload that the arguments matched against. For an invalid call to a non-overloaded
     /// function, this is the return type of the function. For an invalid call to an overloaded
@@ -243,14 +249,6 @@ impl<'db> CallBinding<'db> {
             return overload.return_type();
         }
         Type::unknown()
-    }
-
-    pub(crate) fn errors(&self) -> Vec<CallBindingError<'db>> {
-        self.overloads
-            .iter()
-            .flat_map(OverloadBinding::errors)
-            .cloned()
-            .collect::<Vec<_>>()
     }
 
     fn callable_descriptor(&self, db: &'db dyn Db) -> Option<CallableDescriptor> {
@@ -332,19 +330,8 @@ impl<'db> OverloadBinding<'db> {
         self.return_ty = return_ty;
     }
 
-    pub(crate) fn extend_errors<E: IntoIterator<Item = CallBindingError<'db>>>(
-        &mut self,
-        errors: E,
-    ) {
-        self.errors.extend(errors);
-    }
-
     pub(crate) fn return_type(&self) -> Type<'db> {
         self.return_ty
-    }
-
-    pub(crate) fn errors(&self) -> &[CallBindingError<'db>] {
-        &self.errors
     }
 
     pub(crate) fn parameter_types(&self) -> &[Type<'db>] {
