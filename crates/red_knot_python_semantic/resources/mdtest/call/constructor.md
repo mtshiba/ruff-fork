@@ -1,15 +1,5 @@
 # Constructor
 
-## Temp
-
-```py
-from typing import Any
-
-def f(x: type[Any]):
-    reveal_type(x)  # revealed: type[Any]
-    reveal_type(x)  # revealed: Literal[type[Any]]
-```
-
 ## No init or new
 
 Every class has `object` in it's MRO, so if no `__init__` method is provided, we fall back to

@@ -2845,6 +2845,96 @@ impl<'db> Type<'db> {
                 binding.into_outcome()
             }
 
+            // TODO: currently we can't use typeshed to infer calls using generic
+            // logic below due to a salsa query cycle. When this is fixed, we should
+            // this arm and aboid special casing `TypeVar` in the `ClassLiteral` arm.
+            Type::ClassLiteral(ClassLiteralType { class })
+                if class.is_known(db, KnownClass::TypeVar) =>
+            {
+                // TODO: signature depends on Python version, using 3.11 for now
+                // ```py
+                // class TypeVar:
+                //     elif sys.version_info >= (3, 11):
+                //        def __new__(
+                //            cls, name: str, *constraints: Any, bound: Any | None = None, covariant: bool = False,
+                //            contravariant: bool = False
+                //        ) -> Self: ...None: ...
+                // ```
+                #[salsa::tracked(return_ref)]
+                fn overloads<'db>(db: &'db dyn Db) -> CallableSignature<'db> {
+                    CallableSignature::from_overloads([Signature::new(
+                        Parameters::new([
+                            Parameter::new(
+                                Some(Name::new_static("name")),
+                                Some(KnownClass::Str.to_instance(db)),
+                                ParameterKind::PositionalOnly { default_ty: None },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("constraints")),
+                                Some(Type::any()),
+                                ParameterKind::Variadic {},
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("bound")),
+                                Some(Type::any()),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::none(db)),
+                                },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("covariant")),
+                                Some(KnownClass::Bool.to_class_literal(db)),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::BooleanLiteral(false)),
+                                },
+                            ),
+                            Parameter::new(
+                                Some(Name::new_static("contravariant")),
+                                Some(KnownClass::Bool.to_class_literal(db)),
+                                ParameterKind::KeywordOnly {
+                                    default_ty: Some(Type::BooleanLiteral(false)),
+                                },
+                            ),
+                        ]),
+                        Some(KnownClass::TypeVar.to_instance(db)),
+                    )])
+                }
+
+                let mut binding = bind_call(db, arguments, overloads(db), self);
+                if binding.matching_overload_mut().is_none() {
+                    return Err(CallError::BindingError { binding });
+                };
+
+                binding.into_outcome()
+            }
+
+            // TODO: currently we can't use typeshed to infer calls using generic
+            // logic below due to a salsa query cycle. When this is fixed, we should
+            // this arm and aboid special casing `Object` in the `ClassLiteral` arm.
+            Type::ClassLiteral(ClassLiteralType { class })
+                if class.is_known(db, KnownClass::Object) =>
+            {
+                // ```py
+                // class object:
+                //    def __init__(self) -> None: ...
+                //    def __new__(cls) -> Self: ...
+                // ```
+                #[salsa::tracked(return_ref)]
+                fn overloads<'db>(db: &'db dyn Db) -> CallableSignature<'db> {
+                    CallableSignature::from_overloads([Signature::new(
+                        Parameters::new([]),
+                        Some(KnownClass::Object.to_instance(db)),
+                    )])
+                }
+
+                let mut binding = bind_call(db, arguments, overloads(db), self);
+                if binding.matching_overload_mut().is_none() {
+                    return Err(CallError::BindingError { binding });
+                };
+
+                binding.into_outcome()
+            }
+
             // TODO annotated return type on `__new__` or metaclass `__call__`
             Type::ClassLiteral(ClassLiteralType { class }) => {
                 // User defined or known class not handled by the above cases
