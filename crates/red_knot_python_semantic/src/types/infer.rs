@@ -1980,6 +1980,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         let ty = Type::KnownInstance(KnownInstanceType::TypeVar(TypeVarInstance::new(
             self.db(),
             name.id.clone(),
+            definition,
             bound_or_constraint,
             default_ty,
         )));
