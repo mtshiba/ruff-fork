@@ -2344,6 +2344,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             | Type::SliceLiteral(..)
             | Type::Tuple(..)
             | Type::KnownInstance(..)
+            | Type::PropertyInstance(..)
             | Type::FunctionLiteral(..)
             | Type::Callable(..)
             | Type::AlwaysTruthy
@@ -4432,6 +4433,7 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::SubclassOf(_)
                 | Type::Instance(_)
                 | Type::KnownInstance(_)
+                | Type::PropertyInstance(_)
                 | Type::Union(_)
                 | Type::Intersection(_)
                 | Type::AlwaysTruthy
@@ -4680,6 +4682,7 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::SubclassOf(_)
                 | Type::Instance(_)
                 | Type::KnownInstance(_)
+                | Type::PropertyInstance(_)
                 | Type::Intersection(_)
                 | Type::AlwaysTruthy
                 | Type::AlwaysFalsy
@@ -4696,6 +4699,7 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::SubclassOf(_)
                 | Type::Instance(_)
                 | Type::KnownInstance(_)
+                | Type::PropertyInstance(_)
                 | Type::Intersection(_)
                 | Type::AlwaysTruthy
                 | Type::AlwaysFalsy

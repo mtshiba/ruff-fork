@@ -227,6 +227,11 @@ macro_rules! todo_type {
 
 pub(crate) use todo_type;
 
+#[salsa::interned(debug)]
+pub struct PropertyInstanceType<'db> {
+    getter: Type<'db>,
+}
+
 /// Representation of a type: a set of possible values at runtime.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub enum Type<'db> {
@@ -248,6 +253,8 @@ pub enum Type<'db> {
     Instance(InstanceType<'db>),
     /// A single Python object that requires special treatment in the type system
     KnownInstance(KnownInstanceType<'db>),
+    /// An instance of `builtins.property`
+    PropertyInstance(PropertyInstanceType<'db>),
     /// The set of objects in any of the types in the union
     Union(UnionType<'db>),
     /// The set of objects in all of the types in the intersection
@@ -501,6 +508,7 @@ impl<'db> Type<'db> {
             Type::Tuple(tuple) => Type::Tuple(tuple.with_sorted_unions_and_intersections(db)),
             Type::LiteralString
             | Type::Instance(_)
+            | Type::PropertyInstance(_)
             | Type::AlwaysFalsy
             | Type::AlwaysTruthy
             | Type::BooleanLiteral(_)
@@ -739,6 +747,13 @@ impl<'db> Type<'db> {
             // which means that all instances of `bool` are also instances of `int`
             (Type::Instance(self_instance), Type::Instance(target_instance)) => {
                 self_instance.is_subtype_of(db, target_instance)
+            }
+
+            (Type::PropertyInstance(_), _) => KnownClass::Property
+                .to_instance(db)
+                .is_subtype_of(db, target),
+            (_, Type::PropertyInstance(_)) => {
+                self.is_subtype_of(db, KnownClass::Property.to_instance(db))
             }
 
             // Other than the special cases enumerated above,
@@ -1300,6 +1315,10 @@ impl<'db> Type<'db> {
                 // TODO: Implement disjointedness for general callable types
                 false
             }
+
+            (Type::PropertyInstance(_), _) | (_, Type::PropertyInstance(_)) => KnownClass::Property
+                .to_instance(db)
+                .is_disjoint_from(db, other),
         }
     }
 
@@ -1323,7 +1342,8 @@ impl<'db> Type<'db> {
             | Type::SliceLiteral(_)
             | Type::KnownInstance(_)
             | Type::AlwaysFalsy
-            | Type::AlwaysTruthy => true,
+            | Type::AlwaysTruthy
+            | Type::PropertyInstance(_) => true,
             Type::SubclassOf(subclass_of_ty) => subclass_of_ty.is_fully_static(),
             Type::ClassLiteral(_) | Type::Instance(_) => {
                 // TODO: Ideally, we would iterate over the MRO of the class, check if all
@@ -1396,6 +1416,7 @@ impl<'db> Type<'db> {
             Type::Instance(InstanceType { class }) => {
                 class.known(db).is_some_and(KnownClass::is_singleton)
             }
+            Type::PropertyInstance(_) => false,
             Type::Tuple(..) => {
                 // The empty tuple is a singleton on CPython and PyPy, but not on other Python
                 // implementations such as GraalPy. Its *use* as a singleton is discouraged and
@@ -1463,7 +1484,8 @@ impl<'db> Type<'db> {
             | Type::LiteralString
             | Type::AlwaysTruthy
             | Type::AlwaysFalsy
-            | Type::Callable(CallableType::General(_)) => false,
+            | Type::Callable(CallableType::General(_))
+            | Type::PropertyInstance(_) => false,
         }
     }
 
@@ -1571,7 +1593,8 @@ impl<'db> Type<'db> {
             | Type::BytesLiteral(_)
             | Type::SliceLiteral(_)
             | Type::Tuple(_)
-            | Type::Instance(_) => None,
+            | Type::Instance(_)
+            | Type::PropertyInstance(_) => None,
         }
     }
 
@@ -1662,6 +1685,10 @@ impl<'db> Type<'db> {
                 .instance_member(db, name),
 
             Type::KnownInstance(_) => Symbol::Unbound.into(),
+
+            Type::PropertyInstance(_) => KnownClass::Property
+                .to_instance(db)
+                .instance_member(db, name),
 
             // TODO: we currently don't model the fact that class literals and subclass-of types have
             // a `__dict__` that is filled with class level attributes. Modeling this is currently not
@@ -2053,6 +2080,7 @@ impl<'db> Type<'db> {
             | Type::SliceLiteral(..)
             | Type::Tuple(..)
             | Type::KnownInstance(..)
+            | Type::PropertyInstance(..)
             | Type::FunctionLiteral(..) => {
                 let fallback = self.instance_member(db, name_str);
 
@@ -2251,6 +2279,7 @@ impl<'db> Type<'db> {
                 }
             },
             Type::KnownInstance(known_instance) => known_instance.bool(),
+            Type::PropertyInstance(_) => Truthiness::AlwaysTrue,
             Type::Union(union) => {
                 let mut truthiness = None;
                 let mut all_not_callable = true;
@@ -2904,6 +2933,7 @@ impl<'db> Type<'db> {
             | Type::Callable(..)
             | Type::Instance(_)
             | Type::KnownInstance(_)
+            | Type::PropertyInstance(_)
             | Type::ModuleLiteral(_)
             | Type::IntLiteral(_)
             | Type::StringLiteral(_)
@@ -2963,7 +2993,8 @@ impl<'db> Type<'db> {
             | Type::Tuple(_)
             | Type::Callable(_)
             | Type::Never
-            | Type::FunctionLiteral(_) => Err(InvalidTypeExpressionError {
+            | Type::FunctionLiteral(_)
+            | Type::PropertyInstance(_) => Err(InvalidTypeExpressionError {
                 invalid_expressions: smallvec::smallvec![InvalidTypeExpression::InvalidType(*self)],
                 fallback_type: Type::unknown(),
             }),
@@ -3160,6 +3191,7 @@ impl<'db> Type<'db> {
             Type::Never => Type::Never,
             Type::Instance(InstanceType { class }) => SubclassOfType::from(db, *class),
             Type::KnownInstance(known_instance) => known_instance.class().to_class_literal(db),
+            Type::PropertyInstance(_) => KnownClass::Property.to_class_literal(db),
             Type::Union(union) => union.map(db, |ty| ty.to_meta_type(db)),
             Type::BooleanLiteral(_) => KnownClass::Bool.to_class_literal(db),
             Type::BytesLiteral(_) => KnownClass::Bytes.to_class_literal(db),
