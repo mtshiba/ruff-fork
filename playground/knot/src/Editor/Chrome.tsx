@@ -1,4 +1,4 @@
-import {
+import React, {
   use,
   useCallback,
   useDeferredValue,
@@ -14,16 +14,14 @@ import {
 } from "shared";
 import type { Diagnostic, Workspace } from "red_knot_wasm";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { Files } from "./Files";
+import { Files, isPythonFile } from "./Files";
 import SecondarySideBar from "./SecondarySideBar";
-import Editor from "./Editor";
 import SecondaryPanel, {
   SecondaryPanelResult,
   SecondaryTool,
 } from "./SecondaryPanel";
 import Diagnostics from "./Diagnostics";
-import { editor } from "monaco-editor";
-import IStandaloneCodeEditor = editor.IStandaloneCodeEditor;
+import { type editor } from "monaco-editor";
 import { FileId, ReadonlyFiles } from "../Playground";
 
 interface CheckResult {
@@ -31,6 +29,8 @@ interface CheckResult {
   error: string | null;
   secondary: SecondaryPanelResult;
 }
+
+const Editor = React.lazy(() => import("./Editor"));
 
 export interface Props {
   workspacePromise: Promise<Workspace>;
@@ -66,7 +66,7 @@ export default function Chrome({
     null,
   );
 
-  const editorRef = useRef<IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const handleFileRenamed = (file: FileId, newName: string) => {
     onFileRenamed(workspace, file, newName);
@@ -86,9 +86,12 @@ export default function Chrome({
     [],
   );
 
-  const handleEditorMount = useCallback((editor: IStandaloneCodeEditor) => {
-    editorRef.current = editor;
-  }, []);
+  const handleEditorMount = useCallback(
+    (editor: editor.IStandaloneCodeEditor) => {
+      editorRef.current = editor;
+    },
+    [],
+  );
 
   const handleGoTo = useCallback((line: number, column: number) => {
     const editor = editorRef.current;
@@ -132,15 +135,16 @@ export default function Chrome({
               <PanelGroup id="vertical" direction="vertical">
                 <Panel minSize={10} className="my-2" order={0}>
                   <Editor
-                    key={selectedFileName}
                     theme={theme}
                     visible={true}
+                    files={files}
+                    selected={files.selected}
                     fileName={selectedFileName}
-                    source={files.contents[files.selected]}
                     diagnostics={checkResult.diagnostics}
                     workspace={workspace}
                     onMount={handleEditorMount}
                     onChange={(content) => onFileChanged(workspace, content)}
+                    onOpenFile={onFileSelected}
                   />
                   {checkResult.error ? (
                     <div
@@ -219,10 +223,7 @@ function useCheckResult(
     }
 
     const currentHandle = files.handles[files.selected];
-
-    const extension =
-      currentHandle?.path()?.toLowerCase().split(".").pop() ?? "";
-    if (currentHandle == null || !["py", "pyi", "pyw"].includes(extension)) {
+    if (currentHandle == null || !isPythonFile(currentHandle)) {
       return {
         diagnostics: [],
         error: null,
