@@ -53,7 +53,7 @@ impl BackgroundDocumentRequestHandler for GotoTypeDefinitionRequestHandler {
                 .info
                 .into_iter()
                 .filter_map(|target| {
-                    target.to_link(&db, Some(range_info.range), snapshot.encoding())
+                    target.to_link(&db, Some(range_info.file_range), snapshot.encoding())
                 })
                 .collect();
 

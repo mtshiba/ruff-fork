@@ -21,6 +21,7 @@ import SecondaryPanel, {
   SecondaryTool,
 } from "./SecondaryPanel";
 import Diagnostics from "./Diagnostics";
+import { type Monaco } from "@monaco-editor/react";
 import { type editor } from "monaco-editor";
 import { FileId, ReadonlyFiles } from "../Playground";
 
@@ -66,11 +67,14 @@ export default function Chrome({
     null,
   );
 
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<{
+    monaco: Monaco;
+    editor: editor.IStandaloneCodeEditor;
+  } | null>(null);
 
   const handleFileRenamed = (file: FileId, newName: string) => {
     onFileRenamed(workspace, file, newName);
-    editorRef.current?.focus();
+    editorRef.current?.editor.focus();
   };
 
   const handleSecondaryToolSelected = useCallback(
@@ -87,14 +91,14 @@ export default function Chrome({
   );
 
   const handleEditorMount = useCallback(
-    (editor: editor.IStandaloneCodeEditor) => {
-      editorRef.current = editor;
+    (editor: editor.IStandaloneCodeEditor, monaco: Monaco) => {
+      editorRef.current = { editor, monaco };
     },
     [],
   );
 
   const handleGoTo = useCallback((line: number, column: number) => {
-    const editor = editorRef.current;
+    const editor = editorRef.current?.editor;
 
     if (editor == null) {
       return;
@@ -110,6 +114,25 @@ export default function Chrome({
     editor.setSelection(range);
   }, []);
 
+  const handleRemoved = useCallback(
+    async (id: FileId) => {
+      const name = files.index.find((file) => file.id === id)?.name;
+
+      if (name != null && editorRef.current != null) {
+        // Remove the file from the monaco state to avoid that monaco "restores" the old content.
+        // An alternative is to use a `key` on the `Editor` but that means we lose focus and selection
+        // range when changing between tabs.
+        const monaco = await import("monaco-editor");
+        editorRef.current.monaco.editor
+          .getModel(monaco.Uri.file(name))
+          ?.dispose();
+      }
+
+      onFileRemoved(workspace, id);
+    },
+    [workspace, files.index, onFileRemoved],
+  );
+
   const checkResult = useCheckResult(files, workspace, secondaryTool);
 
   return (
@@ -123,7 +146,7 @@ export default function Chrome({
             onAdd={(name) => onFileAdded(workspace, name)}
             onRename={handleFileRenamed}
             onSelected={onFileSelected}
-            onRemove={(id) => onFileRemoved(workspace, id)}
+            onRemove={handleRemoved}
           />
           <PanelGroup direction="horizontal" autoSaveId="main">
             <Panel

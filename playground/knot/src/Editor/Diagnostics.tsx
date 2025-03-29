@@ -81,7 +81,7 @@ function Items({
         const startColumn = start?.character ?? 1;
 
         return (
-          <li key={`${diagnostic.textRange()?.start ?? 1}-${id ?? index}`}>
+          <li key={`${startLine}:${startColumn}-${id ?? index}`}>
             <button
               onClick={() => onGoTo(startLine, startColumn)}
               className="w-full text-start cursor-pointer"

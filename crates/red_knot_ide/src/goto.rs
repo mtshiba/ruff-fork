@@ -56,7 +56,7 @@ pub fn go_to_type_definition(
     );
 
     Some(RangeInfo {
-        range: FileRange::new(file, goto_target.range()),
+        file_range: FileRange::new(file, goto_target.range()),
         info: ty.navigation_targets(db),
     })
 }
@@ -848,7 +848,7 @@ f(**kwargs<CURSOR>)
 
             let mut source = SubDiagnostic::new(Severity::Info, "Source");
             source.annotate(Annotation::primary(
-                Span::from(targets.range.file()).with_range(targets.range.range()),
+                Span::from(targets.file_range.file()).with_range(targets.file_range.range()),
             ));
 
             for target in targets.info {
