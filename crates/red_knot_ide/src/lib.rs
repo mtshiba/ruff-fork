@@ -1,9 +1,11 @@
 mod db;
 mod find_node;
 mod goto;
+mod hover;
 
 pub use db::Db;
 pub use goto::go_to_type_definition;
+pub use hover::hover;
 use red_knot_python_semantic::types::{
     ClassLiteralType, FunctionType, InstanceType, KnownInstanceType, ModuleLiteralType, Type,
 };
@@ -13,7 +15,7 @@ use ruff_text_size::{Ranged, TextRange};
 /// Information associated with a text range.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct RangeInfo<T> {
-    pub range: FileRange,
+    pub file_range: FileRange,
     pub info: T,
 }
 
