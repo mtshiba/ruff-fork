@@ -4,7 +4,7 @@ use std::ops::Deref;
 use rustc_hash::FxHashSet;
 
 use crate::types::class_base::ClassBase;
-use crate::types::{Class, Type};
+use crate::types::{Class, ClassLiteralType, Type};
 use crate::Db;
 
 /// The inferred method resolution order of a given class.
@@ -24,14 +24,17 @@ impl<'db> Mro<'db> {
     ///
     /// (We emit a diagnostic warning about the runtime `TypeError` in
     /// [`super::infer::TypeInferenceBuilder::infer_region_scope`].)
-    pub(super) fn of_class(db: &'db dyn Db, class: Class<'db>) -> Result<Self, MroError<'db>> {
+    pub(super) fn of_class(
+        db: &'db dyn Db,
+        class: ClassLiteralType<'db>,
+    ) -> Result<Self, MroError<'db>> {
         Self::of_class_impl(db, class).map_err(|error_kind| MroError {
             kind: error_kind,
             fallback_mro: Self::from_error(db, class),
         })
     }
 
-    pub(super) fn from_error(db: &'db dyn Db, class: Class<'db>) -> Self {
+    pub(super) fn from_error(db: &'db dyn Db, class: ClassLiteralType<'db>) -> Self {
         Self::from([
             ClassBase::Class(class),
             ClassBase::unknown(),
@@ -39,7 +42,10 @@ impl<'db> Mro<'db> {
         ])
     }
 
-    fn of_class_impl(db: &'db dyn Db, class: Class<'db>) -> Result<Self, MroErrorKind<'db>> {
+    fn of_class_impl(
+        db: &'db dyn Db,
+        class: ClassLiteralType<'db>,
+    ) -> Result<Self, MroErrorKind<'db>> {
         let class_bases = class.explicit_bases(db);
 
         if !class_bases.is_empty() && class.inheritance_cycle(db).is_some() {
@@ -52,7 +58,7 @@ impl<'db> Mro<'db> {
         match class_bases {
             // `builtins.object` is the special case:
             // the only class in Python that has an MRO with length <2
-            [] if class.is_object(db) => Ok(Self::from([ClassBase::Class(class)])),
+            [] if class.class(db).is_object() => Ok(Self::from([ClassBase::Class(class)])),
 
             // All other classes in Python have an MRO with length >=2.
             // Even if a class has no explicit base classes,
@@ -183,7 +189,7 @@ pub(super) struct MroIterator<'db> {
     db: &'db dyn Db,
 
     /// The class whose MRO we're iterating over
-    class: Class<'db>,
+    class: ClassLiteralType<'db>,
 
     /// Whether or not we've already yielded the first element of the MRO
     first_element_yielded: bool,
@@ -197,7 +203,7 @@ pub(super) struct MroIterator<'db> {
 }
 
 impl<'db> MroIterator<'db> {
-    pub(super) fn new(db: &'db dyn Db, class: Class<'db>) -> Self {
+    pub(super) fn new(db: &'db dyn Db, class: ClassLiteralType<'db>) -> Self {
         Self {
             db,
             class,
@@ -277,7 +283,7 @@ pub(super) enum MroErrorKind<'db> {
     /// of the duplicate bases. The indices are the indices of nodes
     /// in the bases list of the class's [`StmtClassDef`](ruff_python_ast::StmtClassDef) node.
     /// Each index is the index of a node representing a duplicate base.
-    DuplicateBases(Box<[(usize, Class<'db>)]>),
+    DuplicateBases(Box<[(usize, ClassLiteralType<'db>)]>),
 
     /// The MRO is otherwise unresolvable through the C3-merge algorithm.
     ///

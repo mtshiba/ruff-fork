@@ -61,7 +61,7 @@ use crate::symbol::{
     typing_extensions_symbol, Boundness, LookupError,
 };
 use crate::types::call::{Argument, Bindings, CallArgumentTypes, CallArguments, CallError};
-use crate::types::class::{ClassLiteralType, MetaclassErrorKind};
+use crate::types::class::MetaclassErrorKind;
 use crate::types::diagnostic::{
     report_implicit_return_type, report_invalid_arguments_to_annotated,
     report_invalid_arguments_to_callable, report_invalid_assignment,
@@ -5575,7 +5575,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         // updating all of the subscript logic below to use custom callables for all of the _other_
         // special cases, too.
         let value_ty = self.infer_expression(value);
-        if let Type::ClassLiteral(ClassLiteralType { class }) = value_ty {
+        if let Type::ClassLiteral(class) = value_ty {
             if let Some(generic_context) = class.generic_context(self.db()) {
                 return self.infer_explicit_class_specialization(
                     subscript,
@@ -5861,7 +5861,7 @@ impl<'db> TypeInferenceBuilder<'db> {
                         }
                     }
 
-                    if let Type::ClassLiteral(ClassLiteralType { class }) = value_ty {
+                    if let Type::ClassLiteral(class) = value_ty {
                         if class.is_known(self.db(), KnownClass::Type) {
                             return KnownClass::GenericAlias.to_instance(self.db());
                         }

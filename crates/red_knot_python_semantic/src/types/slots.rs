@@ -4,7 +4,7 @@ use crate::db::Db;
 use crate::symbol::{Boundness, Symbol};
 use crate::types::class_base::ClassBase;
 use crate::types::diagnostic::report_base_with_incompatible_slots;
-use crate::types::{Class, ClassLiteralType, Type};
+use crate::types::{Class, Type};
 
 use super::InferContext;
 
@@ -58,7 +58,7 @@ pub(super) fn check_class_slots(context: &InferContext, class: Class, node: &ast
     let mut found_second = false;
 
     for (index, base) in class.explicit_bases(db).iter().enumerate() {
-        let Type::ClassLiteral(ClassLiteralType { class: base }) = base else {
+        let Type::ClassLiteral(base) = base else {
             continue;
         };
 

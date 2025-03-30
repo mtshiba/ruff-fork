@@ -3,10 +3,7 @@ use std::cmp::Ordering;
 use crate::db::Db;
 use crate::types::CallableType;
 
-use super::{
-    class_base::ClassBase, ClassLiteralType, DynamicType, InstanceType, KnownInstanceType,
-    TodoType, Type,
-};
+use super::{class_base::ClassBase, DynamicType, InstanceType, KnownInstanceType, TodoType, Type};
 
 /// Return an [`Ordering`] that describes the canonical order in which two types should appear
 /// in an [`crate::types::IntersectionType`] or a [`crate::types::UnionType`] in order for them
@@ -108,10 +105,7 @@ pub(super) fn union_or_intersection_elements_ordering<'db>(
         (Type::ModuleLiteral(_), _) => Ordering::Less,
         (_, Type::ModuleLiteral(_)) => Ordering::Greater,
 
-        (
-            Type::ClassLiteral(ClassLiteralType { class: left }),
-            Type::ClassLiteral(ClassLiteralType { class: right }),
-        ) => left.cmp(right),
+        (Type::ClassLiteral(left), Type::ClassLiteral(right)) => left.cmp(right),
         (Type::ClassLiteral(_), _) => Ordering::Less,
         (_, Type::ClassLiteral(_)) => Ordering::Greater,
 
