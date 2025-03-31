@@ -298,7 +298,7 @@ impl<'db> Type<'db> {
         matches!(self, Type::Never)
     }
 
-    fn is_none(&self, db: &'db dyn Db) -> bool {
+    pub fn is_none(&self, db: &'db dyn Db) -> bool {
         self.into_instance()
             .is_some_and(|instance| instance.class().is_known(db, KnownClass::NoneType))
     }
