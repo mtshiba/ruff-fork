@@ -288,6 +288,57 @@ impl<'db> NarrowingConstraintsBuilder<'db> {
         NarrowingConstraints::from_iter([(symbol, ty)])
     }
 
+    fn evaluate_expr_in(
+        &mut self,
+        lhs_ty: Type<'db>,
+        rhs_ty: Type<'db>,
+        is_positive: bool,
+    ) -> Type<'db> {
+        let mut builder = UnionBuilder::new(self.db);
+
+        match (lhs_ty, rhs_ty) {
+            (_, Type::Tuple(rhs_tuple)) if lhs_ty.is_literal() => {
+                for element in rhs_tuple.elements(self.db) {
+                    builder = builder.add(*element);
+                }
+                let ty = builder.build();
+                ty.negate_if(self.db, !is_positive)
+            }
+            (_, Type::Tuple(rhs_tuple)) if lhs_ty.is_union_of_literals(self.db) => {
+                for element in rhs_tuple.elements(self.db) {
+                    builder = builder.add(*element);
+                }
+                let ty = builder.build();
+                ty.negate_if(self.db, !is_positive)
+            }
+
+            (Type::StringLiteral(_), Type::StringLiteral(string_literal)) => {
+                for element in string_literal.iter_each_char(self.db) {
+                    builder = builder.add(Type::StringLiteral(element));
+                }
+                let ty = builder.build();
+                ty.negate_if(self.db, !is_positive)
+            }
+            (Type::Union(union_type), Type::StringLiteral(string_literal))
+                if union_type
+                    .elements(self.db)
+                    .iter()
+                    .all(Type::is_string_literal) =>
+            {
+                for element in string_literal.iter_each_char(self.db) {
+                    builder = builder.add(Type::StringLiteral(element));
+                }
+                let ty = builder.build();
+                ty.negate_if(self.db, !is_positive)
+            }
+
+            _ => {
+                builder = builder.add(lhs_ty);
+                builder.build()
+            }
+        }
+    }
+
     fn evaluate_expr_compare(
         &mut self,
         expr_compare: &ast::ExprCompare,
@@ -370,6 +421,14 @@ impl<'db> NarrowingConstraintsBuilder<'db> {
                         }
                         ast::CmpOp::Eq if lhs_ty.is_literal_string() => {
                             constraints.insert(symbol, rhs_ty);
+                        }
+                        ast::CmpOp::In => {
+                            let ty = self.evaluate_expr_in(lhs_ty, rhs_ty, true);
+                            constraints.insert(symbol, ty);
+                        }
+                        ast::CmpOp::NotIn => {
+                            let ty = self.evaluate_expr_in(lhs_ty, rhs_ty, false);
+                            constraints.insert(symbol, ty);
                         }
                         _ => {
                             // TODO other comparison types
