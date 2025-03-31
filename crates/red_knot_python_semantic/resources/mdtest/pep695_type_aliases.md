@@ -13,7 +13,13 @@ python-version = "3.12"
 type IntOrStr = int | str
 
 reveal_type(IntOrStr)  # revealed: typing.TypeAliasType
-reveal_type(IntOrStr.__name__)  # revealed: str
+
+from inspect import getattr_static
+
+reveal_type(type(IntOrStr))  # revealed: Literal[TypeAliasType]
+reveal_type(type(IntOrStr).__name__)  # revealed: property
+
+reveal_type(IntOrStr.__name__)  # revealed: Literal["IntOrStr"]
 
 x: IntOrStr = 1
 

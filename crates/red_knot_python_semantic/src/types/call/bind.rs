@@ -19,7 +19,8 @@ use crate::types::diagnostic::{
 use crate::types::signatures::{Parameter, ParameterForm};
 use crate::types::{
     todo_type, BoundMethodType, CallableType, ClassLiteralType, FunctionDecorators, KnownClass,
-    KnownFunction, PropertyInstanceType, UnionType, WrapperDescriptorDunderGetOf,
+    KnownFunction, KnownInstanceType, PropertyInstanceType, UnionType,
+    WrapperDescriptorDunderGetOf,
 };
 use ruff_db::diagnostic::{OldSecondaryDiagnosticMessage, Span};
 use ruff_python_ast as ast;
@@ -275,34 +276,6 @@ impl<'db> Bindings<'db> {
                                 [_, Some(instance), _] if instance.is_none(db) => {
                                     overload.set_return_type(*function_ty);
                                 }
-
-                                // [_, Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(
-                                //     type_alias,
-                                // ))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
-                                //     if class.is_known(db, KnownClass::TypeAliasType)
-                                //         && function.name(db) == "__name__" =>
-                                // {
-                                //     overload.set_return_type(Type::string_literal(
-                                //         db,
-                                //         type_alias.name(db),
-                                //     ));
-                                // }
-                                // [_, Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
-                                //     if class.is_known(db, KnownClass::TypeVar)
-                                //         && function.name(db) == "__name__" =>
-                                // {
-                                //     overload.set_return_type(Type::string_literal(
-                                //         db,
-                                //         typevar.name(db),
-                                //     ));
-                                // }
-
-                                // [_, Some(_), _]
-                                //     if function
-                                //         .has_known_class_decorator(db, KnownClass::Property) =>
-                                // {
-                                //     overload.set_return_type(todo_type!("@property"));
-                                // }
                                 [_, Some(instance), _] => {
                                     overload.set_return_type(Type::Callable(
                                         CallableType::BoundMethod(BoundMethodType::new(
@@ -325,6 +298,22 @@ impl<'db> Bindings<'db> {
                     {
                         overload.set_return_type(*property);
                     }
+                    [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(type_alias))), ..]
+                        if property
+                            .getter(db)
+                            .into_function_literal()
+                            .is_some_and(|f| f.name(db) == "__name__") =>
+                    {
+                        overload.set_return_type(Type::string_literal(db, type_alias.name(db)));
+                    }
+                    [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeVar(type_var))), ..]
+                        if property
+                            .getter(db)
+                            .into_function_literal()
+                            .is_some_and(|f| f.name(db) == "__name__") =>
+                    {
+                        overload.set_return_type(Type::string_literal(db, type_var.name(db)));
+                    }
                     [Some(Type::PropertyInstance(property)), Some(instance), ..] => {
                         overload.set_return_type(
                             property
@@ -334,10 +323,7 @@ impl<'db> Bindings<'db> {
                                 .unwrap_or(Type::Never),
                         );
                     }
-                    ps => {
-                        dbg!(ps);
-                        todo!();
-                    }
+                    _ => {}
                 },
 
                 Type::FunctionLiteral(function_type) => match function_type.known(db) {
