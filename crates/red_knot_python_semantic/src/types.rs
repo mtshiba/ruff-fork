@@ -4077,6 +4077,7 @@ impl Truthiness {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn and(self, other: Self) -> Self {
         match (self, other) {
             (Truthiness::AlwaysTrue, Truthiness::AlwaysTrue) => Truthiness::AlwaysTrue,

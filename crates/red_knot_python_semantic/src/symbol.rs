@@ -59,6 +59,7 @@ impl<'db> Symbol<'db> {
         Symbol::Type(ty.into(), Boundness::Bound)
     }
 
+    #[allow(unused)]
     pub(crate) fn possibly_unbound(ty: impl Into<Type<'db>>) -> Self {
         Symbol::Type(ty.into(), Boundness::PossiblyUnbound)
     }
