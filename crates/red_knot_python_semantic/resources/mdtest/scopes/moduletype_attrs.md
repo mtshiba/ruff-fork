@@ -58,8 +58,7 @@ reveal_type(typing.__eq__)  # revealed: <bound method `__eq__` of `ModuleType`>
 
 reveal_type(typing.__class__)  # revealed: Literal[ModuleType]
 
-# TODO: needs support for attribute access on instances, properties and generics;
-# should be `dict[str, Any]`
+# TODO: needs support generics; should be `dict[str, Any]`:
 reveal_type(typing.__dict__)  # revealed: @Todo(generics)
 ```
 
@@ -92,8 +91,7 @@ reveal_type(__dict__)  # revealed: Literal["foo"]
 import foo
 from foo import __dict__ as foo_dict
 
-# TODO: needs support for attribute access on instances, properties, and generics;
-# should be `dict[str, Any]` for both of these:
+# TODO: needs support generics; should be `dict[str, Any]` for both of these:
 reveal_type(foo.__dict__)  # revealed: @Todo(generics)
 reveal_type(foo_dict)  # revealed: @Todo(generics)
 ```
