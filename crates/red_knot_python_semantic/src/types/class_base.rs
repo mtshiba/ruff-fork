@@ -1,4 +1,4 @@
-use crate::types::{todo_type, Class, DynamicType, KnownClass, KnownInstanceType, Type};
+use crate::types::{todo_type, ClassType, DynamicType, KnownClass, KnownInstanceType, Type};
 use crate::Db;
 use itertools::Either;
 
@@ -10,7 +10,7 @@ use itertools::Either;
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, salsa::Update)]
 pub(crate) enum ClassBase<'db> {
     Dynamic(DynamicType),
-    Class(Class<'db>),
+    Class(ClassType<'db>),
 }
 
 impl<'db> ClassBase<'db> {
@@ -150,7 +150,7 @@ impl<'db> ClassBase<'db> {
         }
     }
 
-    pub(super) fn into_class(self) -> Option<Class<'db>> {
+    pub(super) fn into_class(self) -> Option<ClassType<'db>> {
         match self {
             Self::Class(class) => Some(class),
             Self::Dynamic(_) => None,
@@ -164,13 +164,13 @@ impl<'db> ClassBase<'db> {
     ) -> Either<impl Iterator<Item = ClassBase<'db>>, impl Iterator<Item = ClassBase<'db>>> {
         match self {
             ClassBase::Dynamic(_) => Either::Left([self, ClassBase::object(db)].into_iter()),
-            ClassBase::Class(class) => Either::Right(class.iter_mro(db)),
+            ClassBase::Class(class) => Either::Right(class.class().iter_mro(db)),
         }
     }
 }
 
-impl<'db> From<Class<'db>> for ClassBase<'db> {
-    fn from(value: Class<'db>) -> Self {
+impl<'db> From<ClassType<'db>> for ClassBase<'db> {
+    fn from(value: ClassType<'db>) -> Self {
         ClassBase::Class(value)
     }
 }

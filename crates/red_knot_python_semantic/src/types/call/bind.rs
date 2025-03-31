@@ -18,8 +18,8 @@ use crate::types::diagnostic::{
 };
 use crate::types::signatures::{Parameter, ParameterForm};
 use crate::types::{
-    todo_type, BoundMethodType, CallableType, ClassLiteralType, KnownClass, KnownFunction,
-    KnownInstanceType, UnionType,
+    todo_type, BoundMethodType, CallableType, KnownClass, KnownFunction, KnownInstanceType,
+    UnionType,
 };
 use ruff_db::diagnostic::{OldSecondaryDiagnosticMessage, Span};
 use ruff_python_ast as ast;
@@ -280,7 +280,7 @@ impl<'db> Bindings<'db> {
 
                                 [_, Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(
                                     type_alias,
-                                ))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
+                                ))), Some(Type::ClassLiteral(class))]
                                     if class.is_known(db, KnownClass::TypeAliasType)
                                         && function.name(db) == "__name__" =>
                                 {
@@ -290,7 +290,7 @@ impl<'db> Bindings<'db> {
                                     ));
                                 }
 
-                                [_, Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
+                                [_, Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))), Some(Type::ClassLiteral(class))]
                                     if class.is_known(db, KnownClass::TypeVar)
                                         && function.name(db) == "__name__" =>
                                 {
@@ -449,7 +449,7 @@ impl<'db> Bindings<'db> {
                     _ => {}
                 },
 
-                Type::ClassLiteral(ClassLiteralType { class }) => match class.known(db) {
+                Type::ClassLiteral(class) => match class.known(db) {
                     Some(KnownClass::Bool) => match overload.parameter_types() {
                         [Some(arg)] => overload.set_return_type(arg.bool(db).into_type(db)),
                         [None] => overload.set_return_type(Type::BooleanLiteral(false)),

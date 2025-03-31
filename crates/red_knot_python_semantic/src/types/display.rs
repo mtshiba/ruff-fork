@@ -9,8 +9,7 @@ use ruff_python_literal::escape::AsciiEscape;
 use crate::types::class_base::ClassBase;
 use crate::types::signatures::{Parameter, Parameters, Signature};
 use crate::types::{
-    CallableType, ClassLiteralType, InstanceType, IntersectionType, KnownClass, StringLiteralType,
-    Type, UnionType,
+    CallableType, InstanceType, IntersectionType, KnownClass, StringLiteralType, Type, UnionType,
 };
 use crate::Db;
 use rustc_hash::FxHashMap;
@@ -80,7 +79,7 @@ impl Display for DisplayRepresentation<'_> {
                 write!(f, "<module '{}'>", module.module(self.db).name())
             }
             // TODO functions and classes should display using a fully qualified name
-            Type::ClassLiteral(ClassLiteralType { class }) => f.write_str(class.name(self.db)),
+            Type::ClassLiteral(class) => f.write_str(class.name(self.db)),
             Type::SubclassOf(subclass_of_ty) => match subclass_of_ty.subclass_of() {
                 // Only show the bare class name here; ClassBase::display would render this as
                 // type[<class 'Foo'>] instead of type[Foo].
@@ -98,6 +97,13 @@ impl Display for DisplayRepresentation<'_> {
                     "<bound method `{method}` of `{instance}`>",
                     method = bound_method.function(self.db).name(self.db),
                     instance = bound_method.self_instance(self.db).display(self.db)
+                )
+            }
+            Type::Callable(CallableType::Specialized(specialized)) => {
+                write!(
+                    f,
+                    "<specialization of {callable}>",
+                    callable = specialized.callable_type(self.db).display(self.db),
                 )
             }
             Type::Callable(CallableType::MethodWrapperDunderGet(function)) => {
