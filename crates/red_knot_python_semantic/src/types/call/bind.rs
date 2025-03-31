@@ -18,8 +18,9 @@ use crate::types::diagnostic::{
 };
 use crate::types::signatures::{Parameter, ParameterForm};
 use crate::types::{
-    todo_type, BoundMethodType, CallableType, ClassLiteralType, KnownClass, KnownFunction,
-    KnownInstanceType, UnionType,
+    todo_type, BoundMethodType, CallableType, ClassLiteralType, FunctionDecorators, KnownClass,
+    KnownFunction, KnownInstanceType, PropertyInstanceType, UnionType,
+    WrapperDescriptorDunderGetOf,
 };
 use ruff_db::diagnostic::{OldSecondaryDiagnosticMessage, Span};
 use ruff_python_ast as ast;
@@ -211,9 +212,7 @@ impl<'db> Bindings<'db> {
 
             match binding_type {
                 Type::Callable(CallableType::MethodWrapperDunderGet(function)) => {
-                    if function.has_known_class_decorator(db, KnownClass::Classmethod)
-                        && function.decorators(db).len() == 1
-                    {
+                    if function.has_known_decorator(db, FunctionDecorators::CLASSMETHOD) {
                         match overload.parameter_types() {
                             [_, Some(owner)] => {
                                 overload.set_return_type(Type::Callable(
@@ -244,13 +243,13 @@ impl<'db> Bindings<'db> {
                     }
                 }
 
-                Type::Callable(CallableType::WrapperDescriptorDunderGet) => {
+                Type::Callable(CallableType::WrapperDescriptorDunderGet(
+                    WrapperDescriptorDunderGetOf::FunctionType,
+                )) => {
                     if let [Some(function_ty @ Type::FunctionLiteral(function)), ..] =
                         overload.parameter_types()
                     {
-                        if function.has_known_class_decorator(db, KnownClass::Classmethod)
-                            && function.decorators(db).len() == 1
-                        {
+                        if function.has_known_decorator(db, FunctionDecorators::CLASSMETHOD) {
                             match overload.parameter_types() {
                                 [_, _, Some(owner)] => {
                                     overload.set_return_type(Type::Callable(
@@ -277,36 +276,6 @@ impl<'db> Bindings<'db> {
                                 [_, Some(instance), _] if instance.is_none(db) => {
                                     overload.set_return_type(*function_ty);
                                 }
-
-                                [_, Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(
-                                    type_alias,
-                                ))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
-                                    if class.is_known(db, KnownClass::TypeAliasType)
-                                        && function.name(db) == "__name__" =>
-                                {
-                                    overload.set_return_type(Type::string_literal(
-                                        db,
-                                        type_alias.name(db),
-                                    ));
-                                }
-
-                                [_, Some(Type::KnownInstance(KnownInstanceType::TypeVar(typevar))), Some(Type::ClassLiteral(ClassLiteralType { class }))]
-                                    if class.is_known(db, KnownClass::TypeVar)
-                                        && function.name(db) == "__name__" =>
-                                {
-                                    overload.set_return_type(Type::string_literal(
-                                        db,
-                                        typevar.name(db),
-                                    ));
-                                }
-
-                                [_, Some(_), _]
-                                    if function
-                                        .has_known_class_decorator(db, KnownClass::Property) =>
-                                {
-                                    overload.set_return_type(todo_type!("@property"));
-                                }
-
                                 [_, Some(instance), _] => {
                                     overload.set_return_type(Type::Callable(
                                         CallableType::BoundMethod(BoundMethodType::new(
@@ -320,6 +289,42 @@ impl<'db> Bindings<'db> {
                         }
                     }
                 }
+
+                Type::Callable(CallableType::WrapperDescriptorDunderGet(
+                    WrapperDescriptorDunderGetOf::Property,
+                )) => match overload.parameter_types() {
+                    [Some(property @ Type::PropertyInstance(_)), Some(instance), ..]
+                        if instance.is_none(db) =>
+                    {
+                        overload.set_return_type(*property);
+                    }
+                    [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeAliasType(type_alias))), ..]
+                        if property
+                            .getter(db)
+                            .into_function_literal()
+                            .is_some_and(|f| f.name(db) == "__name__") =>
+                    {
+                        overload.set_return_type(Type::string_literal(db, type_alias.name(db)));
+                    }
+                    [Some(Type::PropertyInstance(property)), Some(Type::KnownInstance(KnownInstanceType::TypeVar(type_var))), ..]
+                        if property
+                            .getter(db)
+                            .into_function_literal()
+                            .is_some_and(|f| f.name(db) == "__name__") =>
+                    {
+                        overload.set_return_type(Type::string_literal(db, type_var.name(db)));
+                    }
+                    [Some(Type::PropertyInstance(property)), Some(instance), ..] => {
+                        overload.set_return_type(
+                            property
+                                .getter(db)
+                                .try_call(db, CallArgumentTypes::positional([*instance]))
+                                .map(|binding| binding.return_type(db))
+                                .unwrap_or(Type::Never),
+                        );
+                    }
+                    _ => {}
+                },
 
                 Type::FunctionLiteral(function_type) => match function_type.known(db) {
                     Some(KnownFunction::IsEquivalentTo) => {
@@ -467,6 +472,14 @@ impl<'db> Bindings<'db> {
                     Some(KnownClass::Type) if overload_index == 0 => {
                         if let [Some(arg)] = overload.parameter_types() {
                             overload.set_return_type(arg.to_meta_type(db));
+                        }
+                    }
+
+                    Some(KnownClass::Property) if overload_index == 0 => {
+                        if let [Some(getter)] = overload.parameter_types() {
+                            overload.set_return_type(Type::PropertyInstance(
+                                PropertyInstanceType::new(db, getter),
+                            ));
                         }
                     }
 
@@ -945,10 +958,12 @@ impl<'db> CallableDescription<'db> {
                     name: function.name(db),
                 })
             }
-            Type::Callable(CallableType::WrapperDescriptorDunderGet) => Some(CallableDescription {
-                kind: "wrapper descriptor",
-                name: "FunctionType.__get__",
-            }),
+            Type::Callable(CallableType::WrapperDescriptorDunderGet(..)) => {
+                Some(CallableDescription {
+                    kind: "wrapper descriptor",
+                    name: "FunctionType.__get__", //TODO
+                })
+            }
             _ => None,
         }
     }
