@@ -1,13 +1,14 @@
 use std::fmt;
+use std::iter::zip;
 
 use rustc_hash::FxHashSet;
 
-use ruff_diagnostics::{Diagnostic, Violation};
+use ruff_diagnostics::{Diagnostic, Edit, Fix, Violation};
 use ruff_macros::{derive_message_formats, ViolationMetadata};
-use ruff_python_ast::{self as ast, Expr, LiteralExpressionRef};
+use ruff_python_ast::{self as ast, Expr, ExprContext, LiteralExpressionRef};
 use ruff_python_semantic::analyze::typing::traverse_union;
 use ruff_python_semantic::SemanticModel;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::checkers::ast::Checker;
 use crate::fix::snippet::SourceCodeSnippet;
@@ -61,12 +62,20 @@ impl Violation for RedundantLiteralUnion {
 pub(crate) fn redundant_literal_union<'a>(checker: &Checker, union: &'a Expr) {
     let mut typing_literal_exprs = Vec::new();
     let mut builtin_types_in_union = FxHashSet::default();
+    let mut literal_subscript = None;
+    let mut literal_exprs = Vec::new();
 
     // Adds a member to `literal_exprs` for each value in a `Literal`, and any builtin types
     // to `builtin_types_in_union`.
     let mut func = |expr: &'a Expr, _parent: &'a Expr| {
         if let Expr::Subscript(ast::ExprSubscript { value, slice, .. }) = expr {
             if checker.semantic().match_typing_expr(value, "Literal") {
+                literal_exprs.push(expr);
+
+                if literal_subscript.is_none() {
+                    literal_subscript = Some(value.as_ref());
+                }
+
                 if let Expr::Tuple(tuple) = &**slice {
                     typing_literal_exprs.extend(tuple);
                 } else {
@@ -84,13 +93,18 @@ pub(crate) fn redundant_literal_union<'a>(checker: &Checker, union: &'a Expr) {
 
     traverse_union(&mut func, checker.semantic(), union);
 
+    let mut diagnostics = Vec::new();
+    let mut non_redundant_literal_types = Vec::new();
+    let mut redundant_literal_types = Vec::new();
+
     for typing_literal_expr in typing_literal_exprs {
         let Some(literal_type) = match_literal_type(typing_literal_expr) else {
             continue;
         };
 
         if builtin_types_in_union.contains(&literal_type) {
-            checker.report_diagnostic(Diagnostic::new(
+            redundant_literal_types.push(typing_literal_expr);
+            diagnostics.push(Diagnostic::new(
                 RedundantLiteralUnion {
                     literal: SourceCodeSnippet::from_str(
                         checker.locator().slice(typing_literal_expr),
@@ -99,8 +113,76 @@ pub(crate) fn redundant_literal_union<'a>(checker: &Checker, union: &'a Expr) {
                 },
                 typing_literal_expr.range(),
             ));
+        } else {
+            non_redundant_literal_types.push(typing_literal_expr);
         }
     }
+
+    let mut non_redundant_literal_type_groups = Vec::new();
+
+    // Group all the non-redundant literal types together based on the `Literals`
+    let mut func = |expr: &'a Expr, _parent: &'a Expr| {
+        if let Expr::Subscript(ast::ExprSubscript { value, slice, .. }) = expr {
+            if checker.semantic().match_typing_expr(value, "Literal") {
+                let mut group = Vec::new();
+
+                if let Expr::Tuple(tuple) = &**slice {
+                    for tuple_slice in tuple {
+                        if non_redundant_literal_types.contains(&tuple_slice) {
+                            group.push(tuple_slice);
+                        }
+                    }
+                } else {
+                    if non_redundant_literal_types.contains(&slice.as_ref()) {
+                        group.push(slice);
+                    }
+                }
+
+                non_redundant_literal_type_groups.push(group);
+            }
+        }
+    };
+
+    traverse_union(&mut func, checker.semantic(), union);
+
+    let Some(literal_subscript) = literal_subscript else {
+        return;
+    };
+
+    for (diagnostic, (group, literal_expr)) in zip(
+        &mut diagnostics,
+        zip(non_redundant_literal_type_groups, literal_exprs),
+    ) {
+        if group.is_empty() {
+            // This contains a `Literal` that has to be deleted
+            let fix = Fix::safe_edit(Edit::range_deletion(literal_expr.range()));
+            diagnostic.set_fix(fix);
+        } else {
+            let new_literal_expr = Expr::Subscript(ast::ExprSubscript {
+                value: Box::new(literal_subscript.clone()),
+                range: TextRange::default(),
+                ctx: ExprContext::Load,
+                slice: Box::new(if group.len() > 1 {
+                    Expr::Tuple(ast::ExprTuple {
+                        elts: group.into_iter().cloned().collect(),
+                        range: TextRange::default(),
+                        ctx: ExprContext::Load,
+                        parenthesized: true,
+                    })
+                } else {
+                    group[0].clone()
+                }),
+            });
+
+            let fix = Fix::safe_edit(Edit::range_replacement(
+                checker.generator().expr(&new_literal_expr),
+                literal_expr.range(),
+            ));
+            diagnostic.set_fix(fix);
+        }
+    }
+
+    checker.report_diagnostics(diagnostics);
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
