@@ -825,7 +825,7 @@ impl<'db> AssignmentDefinitionKind<'db> {
         self.value.node()
     }
 
-    pub(crate) fn value_expression(&self) -> Expression<'db> {
+    pub(crate) fn value_expression(&self) -> Expression {
         self.value_expression
     }
 
@@ -904,7 +904,7 @@ impl<'db> WithItemDefinitionKind<'db> {
         self.context_expr.node()
     }
 
-    pub(crate) fn context_expr_expression(&self) -> Expression<'db> {
+    pub(crate) fn context_expr_expression(&self) -> Expression {
         self.context_expr_expression
     }
 
@@ -947,7 +947,7 @@ impl<'db> ForStmtDefinitionKind<'db> {
         }
     }
 
-    pub(crate) fn iterable_expression(&self) -> Expression<'db> {
+    pub(crate) fn iterable_expression(&self) -> Expression {
         self.iterable_expression
     }
 

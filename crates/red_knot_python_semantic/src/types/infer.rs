@@ -1829,9 +1829,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         let context_expr = with_item.context_expr();
         let target = with_item.target();
 
-        let types = infer_expression_types(self.db(), with_item.context_expr_expression());
-        self.extend(types);
-        let context_expr_ty = self.expression_type(with_item.context_expr());
+        let context_expr_ty = self.infer_standalone_expression(context_expr);
 
         let target_ty = if with_item.is_async() {
             todo_type!("async `with` statement")
@@ -2638,9 +2636,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         let value = assignment.value();
         let target = assignment.target();
 
-        let types = infer_expression_types(self.db(), assignment.value_expression());
-        self.extend(types);
-        let value_ty = self.expression_type(assignment.value());
+        let value_ty = self.infer_standalone_expression(value);
 
         let mut target_ty = match assignment.target_kind() {
             TargetKind::Sequence(unpack_position, unpack) => {
@@ -2932,9 +2928,7 @@ impl<'db> TypeInferenceBuilder<'db> {
         let iterable = for_stmt.iterable();
         let target = for_stmt.target();
 
-        let types = infer_expression_types(self.db(), for_stmt.iterable_expression());
-        self.extend(types);
-        let iterable_type = self.expression_type(for_stmt.iterable());
+        let iterable_type = self.infer_standalone_expression(iterable);
 
         let loop_var_value_type = if for_stmt.is_async() {
             todo_type!("async iterables/iterators")
