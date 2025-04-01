@@ -1827,7 +1827,9 @@ impl<'db> TypeInferenceBuilder<'db> {
         definition: Definition<'db>,
     ) {
         let context_expr = with_item.context_expr().node_ref(self.db());
-        let target = with_item.target();
+        let Some(name) = with_item.target().as_name_expr() else {
+            return;
+        };
 
         let context_expr_ty = self.infer_standalone_expression(context_expr);
 
@@ -1837,11 +1839,11 @@ impl<'db> TypeInferenceBuilder<'db> {
             match with_item.target_kind() {
                 TargetKind::Sequence(unpack_position, unpack) => {
                     let unpacked = infer_unpack_types(self.db(), unpack);
-                    let target_ast_id = target.scoped_expression_id(self.db(), self.scope());
+                    let name_ast_id = name.scoped_expression_id(self.db(), self.scope());
                     if unpack_position == UnpackPosition::First {
                         self.context.extend(unpacked);
                     }
-                    unpacked.expression_type(target_ast_id)
+                    unpacked.expression_type(name_ast_id)
                 }
                 TargetKind::Name => self.infer_context_expression(
                     context_expr,
@@ -1851,8 +1853,8 @@ impl<'db> TypeInferenceBuilder<'db> {
             }
         };
 
-        self.store_expression_type(target, target_ty);
-        self.add_binding(target.into(), definition, target_ty);
+        self.store_expression_type(name, target_ty);
+        self.add_binding(name.into(), definition, target_ty);
     }
 
     /// Infers the type of a context expression (`with expr`) and returns the target's type
@@ -2634,7 +2636,9 @@ impl<'db> TypeInferenceBuilder<'db> {
         definition: Definition<'db>,
     ) {
         let value = assignment.value().node_ref(self.db());
-        let target = assignment.target();
+        let Some(name) = assignment.target().as_name_expr() else {
+            return;
+        };
 
         let value_ty = self.infer_standalone_expression(value);
 
@@ -2647,19 +2651,19 @@ impl<'db> TypeInferenceBuilder<'db> {
                     self.context.extend(unpacked);
                 }
 
-                let target_ast_id = target.scoped_expression_id(self.db(), self.scope());
-                unpacked.expression_type(target_ast_id)
+                let name_ast_id = name.scoped_expression_id(self.db(), self.scope());
+                unpacked.expression_type(name_ast_id)
             }
             TargetKind::Name => {
                 // `TYPE_CHECKING` is a special variable that should only be assigned `False`
                 // at runtime, but is always considered `True` in type checking.
                 // See mdtest/known_constants.md#user-defined-type_checking for details.
-                if target.as_name_expr().map(|name| name.id.as_str()) == Some("TYPE_CHECKING") {
+                if &name.id == "TYPE_CHECKING" {
                     if !matches!(
                         value.as_boolean_literal_expr(),
                         Some(ast::ExprBooleanLiteral { value: false, .. })
                     ) {
-                        report_invalid_type_checking_constant(&self.context, target.into());
+                        report_invalid_type_checking_constant(&self.context, name.into());
                     }
                     Type::BooleanLiteral(true)
                 } else if self.in_stub() && value.is_ellipsis_literal_expr() {
@@ -2670,14 +2674,14 @@ impl<'db> TypeInferenceBuilder<'db> {
             }
         };
 
-        if let Some(known_instance) = target.as_name_expr().and_then(|name| {
+        if let Some(known_instance) =
             KnownInstanceType::try_from_file_and_name(self.db(), self.file(), &name.id)
-        }) {
+        {
             target_ty = Type::KnownInstance(known_instance);
         }
 
-        self.store_expression_type(target, target_ty);
-        self.add_binding(target.into(), definition, target_ty);
+        self.store_expression_type(name, target_ty);
+        self.add_binding(name.into(), definition, target_ty);
     }
 
     fn infer_annotated_assignment_statement(&mut self, assignment: &ast::StmtAnnAssign) {
@@ -2926,7 +2930,9 @@ impl<'db> TypeInferenceBuilder<'db> {
         definition: Definition<'db>,
     ) {
         let iterable = &**for_stmt.iterable().node_ref(self.db());
-        let target = for_stmt.target();
+        let Some(name) = for_stmt.target().as_name_expr() else {
+            return;
+        };
 
         let iterable_type = self.infer_standalone_expression(iterable);
 
@@ -2939,8 +2945,8 @@ impl<'db> TypeInferenceBuilder<'db> {
                     if unpack_position == UnpackPosition::First {
                         self.context.extend(unpacked);
                     }
-                    let target_ast_id = target.scoped_expression_id(self.db(), self.scope());
-                    unpacked.expression_type(target_ast_id)
+                    let name_ast_id = name.scoped_expression_id(self.db(), self.scope());
+                    unpacked.expression_type(name_ast_id)
                 }
                 TargetKind::Name => iterable_type.try_iterate(self.db()).unwrap_or_else(|err| {
                     err.report_diagnostic(&self.context, iterable_type, iterable.into());
@@ -2949,8 +2955,8 @@ impl<'db> TypeInferenceBuilder<'db> {
             }
         };
 
-        self.store_expression_type(target, loop_var_value_type);
-        self.add_binding(target.into(), definition, loop_var_value_type);
+        self.store_expression_type(name, loop_var_value_type);
+        self.add_binding(name.into(), definition, loop_var_value_type);
     }
 
     fn infer_while_statement(&mut self, while_statement: &ast::StmtWhile) {
