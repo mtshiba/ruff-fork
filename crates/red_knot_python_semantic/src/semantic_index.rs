@@ -5,6 +5,7 @@ use ruff_db::files::File;
 use ruff_db::parsed::parsed_module;
 use ruff_index::{IndexSlice, IndexVec};
 
+use ruff_python_ast::name::Name;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use salsa::plumbing::AsId;
 use salsa::Update;
@@ -106,12 +107,13 @@ pub(crate) fn use_def_map<'db>(db: &'db dyn Db, scope: ScopeId<'db>) -> Arc<UseD
     index.use_def_map(scope.file_scope_id(db))
 }
 
-/// Returns all attribute assignments for a specific class body scope.
-pub(crate) fn attribute_assignments<'db, 's>(
+/// Returns all attribute assignment symbols and their method scope ids for a specific class body scope.
+#[salsa::tracked]
+pub(crate) fn attribute_symbols<'db>(
     db: &'db dyn Db,
     class_body_scope: ScopeId<'db>,
-    name: &'s str,
-) -> impl Iterator<Item = BindingWithConstraints<'db, 'db>> + use<'s, 'db> {
+    name: Name, // tracked functions do not accept a borrowed `str` with an implicit lifetime
+) -> Vec<(FileScopeId, ScopedSymbolId)> {
     let file = class_body_scope.file(db);
     let index = semantic_index(db, file);
     let class_scope_id = class_body_scope.file_scope_id(db);
@@ -126,11 +128,10 @@ pub(crate) fn attribute_assignments<'db, 's>(
             }
             maybe_method.node().as_function()?;
             let attribute_table = index.instance_attribute_table(file_scope_id);
-            let symbol = attribute_table.symbol_id_by_name(name)?;
-            let use_def = &index.use_def_maps[file_scope_id];
-            Some(use_def.attribute_assignments(symbol))
+            let symbol = attribute_table.symbol_id_by_name(&name)?;
+            Some((file_scope_id, symbol))
         })
-        .flatten()
+        .collect()
 }
 
 /// Returns the module global scope of `file`.
@@ -1170,7 +1171,7 @@ class C[T]:
         let ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(num),
             ..
-        }) = assignment.value()
+        }) = &**assignment.value().node_ref(&db)
         else {
             panic!("should be a number literal")
         };
