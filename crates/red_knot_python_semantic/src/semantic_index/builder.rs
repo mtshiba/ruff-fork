@@ -1666,12 +1666,13 @@ where
                 if is_definition {
                     match self.current_assignment() {
                         Some(CurrentAssignment::Assign { node, unpack }) => {
-                            let value = self.add_standalone_expression(&node.value);
+                            let value_expression = self.add_standalone_expression(&node.value);
                             self.add_definition(
                                 symbol,
                                 AssignmentDefinitionNodeRef {
                                     unpack,
-                                    value,
+                                    value: &node.value,
+                                    value_expression,
                                     target: expr,
                                 },
                             );
@@ -1683,7 +1684,8 @@ where
                                 symbol,
                                 AnnotatedAssignmentDefinitionNodeRef {
                                     node: ann_assign,
-                                    annotation,
+                                    annotation: &ann_assign.annotation,
+                                    annotation_expression: annotation,
                                     value: ann_assign.value.as_deref(),
                                     target: expr,
                                 },
@@ -1693,12 +1695,13 @@ where
                             self.add_definition(symbol, aug_assign);
                         }
                         Some(CurrentAssignment::For { node, unpack }) => {
-                            let iterable = self.add_standalone_expression(&node.iter);
+                            let iterable_expression = self.add_standalone_expression(&node.iter);
                             self.add_definition(
                                 symbol,
                                 ForStmtDefinitionNodeRef {
                                     unpack,
-                                    iterable,
+                                    iterable: &node.iter,
+                                    iterable_expression,
                                     target: expr,
                                     is_async: node.is_async,
                                 },
@@ -1726,12 +1729,14 @@ where
                             is_async,
                             unpack,
                         }) => {
-                            let context_expr = self.add_standalone_expression(&item.context_expr);
+                            let context_expr_expression =
+                                self.add_standalone_expression(&item.context_expr);
                             self.add_definition(
                                 symbol,
                                 WithItemDefinitionNodeRef {
                                     unpack,
-                                    context_expr,
+                                    context_expr: &item.context_expr,
+                                    context_expr_expression,
                                     target: expr,
                                     is_async,
                                 },
@@ -1919,6 +1924,10 @@ where
                         let value = self.add_standalone_expression(&node.value);
                         let assignment = AssignmentDefinitionKind::new(
                             TargetKind::from(unpack),
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                AstNodeRef::new(self.module.clone(), &node.value)
+                            },
                             value,
                             // SAFETY: `expr` belongs to the `self.module` tree
                             #[allow(unsafe_code)]
@@ -1937,6 +1946,10 @@ where
                             self.add_standalone_type_expression(&ann_assign.annotation);
                         let assignment = AnnotatedAssignmentDefinitionKind::new(
                             annotation,
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                AstNodeRef::new(self.module.clone(), &ann_assign.annotation)
+                            },
                             ann_assign.value.as_deref().map(|value| {
                                 // SAFETY: `value` belongs to the `self.module` tree
                                 #[allow(unsafe_code)]
@@ -1960,6 +1973,10 @@ where
                         let iterable = self.add_standalone_expression(&node.iter);
                         let assignment = ForStmtDefinitionKind::new(
                             TargetKind::from(unpack),
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                AstNodeRef::new(self.module.clone(), &node.iter)
+                            },
                             iterable,
                             // SAFETY: `expr` belongs to the `self.module` tree
                             #[allow(unsafe_code)]
@@ -1983,6 +2000,10 @@ where
                         let context_expr = self.add_standalone_expression(&item.context_expr);
                         let assignment = WithItemDefinitionKind::new(
                             TargetKind::from(unpack),
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                AstNodeRef::new(self.module.clone(), &item.context_expr)
+                            },
                             context_expr,
                             // SAFETY: `expr` belongs to the `self.module` tree
                             #[allow(unsafe_code)]
