@@ -23,7 +23,7 @@ use crate::{
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 use ruff_db::files::File;
-use ruff_python_ast::{self as ast, PythonVersion};
+use ruff_python_ast::{self as ast, name::Name, PythonVersion};
 use rustc_hash::FxHashSet;
 
 use super::{
@@ -500,10 +500,12 @@ impl<'db> Class<'db> {
 
     /// Tries to find declarations/bindings of an instance attribute named `name` that are only
     /// "implicitly" defined in a method of the class that corresponds to `class_body_scope`.
+    #[salsa::tracked]
     fn implicit_instance_attribute(
+        self,
         db: &'db dyn Db,
         class_body_scope: ScopeId<'db>,
-        name: &str,
+        name: Name,
     ) -> Symbol<'db> {
         // If we do not see any declarations of an attribute, neither in the class body nor in
         // any method, we build a union of `Unknown` with the inferred types of all bindings of
@@ -513,7 +515,7 @@ impl<'db> Class<'db> {
 
         let mut is_attribute_bound = Truthiness::AlwaysFalse;
 
-        for attribute_assignment in attribute_assignments(db, class_body_scope, name) {
+        for attribute_assignment in attribute_assignments(db, class_body_scope, &name) {
             let Some(binding) = attribute_assignment.binding else {
                 continue;
             };
@@ -666,8 +668,9 @@ impl<'db> Class<'db> {
 
         let body_scope = self.body_scope(db);
         let table = symbol_table(db, body_scope);
+        let name = Name::new(name);
 
-        if let Some(symbol_id) = table.symbol_id_by_name(name) {
+        if let Some(symbol_id) = table.symbol_id_by_name(&name) {
             let use_def = use_def_map(db, body_scope);
 
             let declarations = use_def.public_declarations(symbol_id);
@@ -686,9 +689,9 @@ impl<'db> Class<'db> {
                     if has_binding {
                         // The attribute is declared and bound in the class body.
 
-                        if let Some(implicit_ty) =
-                            Self::implicit_instance_attribute(db, body_scope, name)
-                                .ignore_possibly_unbound()
+                        if let Some(implicit_ty) = self
+                            .implicit_instance_attribute(db, body_scope, name)
+                            .ignore_possibly_unbound()
                         {
                             if declaredness == Boundness::Bound {
                                 // If a symbol is definitely declared, and we see
@@ -721,9 +724,9 @@ impl<'db> Class<'db> {
                         if declaredness == Boundness::Bound {
                             declared.with_qualifiers(qualifiers)
                         } else {
-                            if let Some(implicit_ty) =
-                                Self::implicit_instance_attribute(db, body_scope, name)
-                                    .ignore_possibly_unbound()
+                            if let Some(implicit_ty) = self
+                                .implicit_instance_attribute(db, body_scope, name)
+                                .ignore_possibly_unbound()
                             {
                                 Symbol::Type(
                                     UnionType::from_elements(db, [declared_ty, implicit_ty]),
@@ -744,7 +747,8 @@ impl<'db> Class<'db> {
                     // The attribute is not *declared* in the class body. It could still be declared/bound
                     // in a method.
 
-                    Self::implicit_instance_attribute(db, body_scope, name).into()
+                    self.implicit_instance_attribute(db, body_scope, name)
+                        .into()
                 }
                 Err((declared, _conflicting_declarations)) => {
                     // There are conflicting declarations for this attribute in the class body.
@@ -755,7 +759,8 @@ impl<'db> Class<'db> {
             // This attribute is neither declared nor bound in the class body.
             // It could still be implicitly defined in a method.
 
-            Self::implicit_instance_attribute(db, body_scope, name).into()
+            self.implicit_instance_attribute(db, body_scope, name)
+                .into()
         }
     }
 
