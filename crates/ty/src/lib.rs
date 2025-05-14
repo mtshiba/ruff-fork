@@ -23,7 +23,7 @@ use ruff_db::diagnostic::{Diagnostic, DisplayDiagnosticConfig, Severity};
 use ruff_db::max_parallelism;
 use ruff_db::system::{OsSystem, SystemPath, SystemPathBuf};
 use salsa::plumbing::ZalsaDatabase;
-use ty_project::metadata::options::Options;
+use ty_project::metadata::options::ProjectOptionsOverrides;
 use ty_project::watch::ProjectWatcher;
 use ty_project::{Db, DummyReporter, Reporter, watch};
 use ty_project::{ProjectDatabase, ProjectMetadata};
@@ -105,10 +105,15 @@ fn run_check(args: CheckCommand) -> anyhow::Result<ExitStatus> {
     let system = OsSystem::new(cwd);
     let watch = args.watch;
     let exit_zero = args.exit_zero;
+    let config_file = args.config_file.clone();
 
-    let cli_options = args.into_options();
-    let mut project_metadata = ProjectMetadata::discover(&project_path, &system)?;
-    project_metadata.apply_cli_options(cli_options.clone());
+    let mut project_metadata = match &config_file {
+        Some(config_file) => ProjectMetadata::from_config_file(config_file.clone(), &system)?,
+        None => ProjectMetadata::discover(&project_path, &system)?,
+    };
+
+    let options = args.into_options();
+    project_metadata.apply_options(options.clone());
     project_metadata.apply_configuration_files(&system)?;
 
     let mut db = ProjectDatabase::new(project_metadata, system)?;
@@ -117,7 +122,8 @@ fn run_check(args: CheckCommand) -> anyhow::Result<ExitStatus> {
         db.project().set_included_paths(&mut db, check_paths);
     }
 
-    let (main_loop, main_loop_cancellation_token) = MainLoop::new(cli_options);
+    let meta_options = ProjectOptionsOverrides::new(config_file, options);
+    let (main_loop, main_loop_cancellation_token) = MainLoop::new(meta_options);
 
     // Listen to Ctrl+C and abort the watch mode.
     let main_loop_cancellation_token = Mutex::new(Some(main_loop_cancellation_token));
@@ -178,11 +184,11 @@ struct MainLoop {
     /// The file system watcher, if running in watch mode.
     watcher: Option<ProjectWatcher>,
 
-    cli_options: Options,
+    meta_options: ProjectOptionsOverrides,
 }
 
 impl MainLoop {
-    fn new(cli_options: Options) -> (Self, MainLoopCancellationToken) {
+    fn new(meta_options: ProjectOptionsOverrides) -> (Self, MainLoopCancellationToken) {
         let (sender, receiver) = crossbeam_channel::bounded(10);
 
         (
@@ -190,7 +196,7 @@ impl MainLoop {
                 sender: sender.clone(),
                 receiver,
                 watcher: None,
-                cli_options,
+                meta_options,
             },
             MainLoopCancellationToken { sender },
         )
@@ -340,7 +346,7 @@ impl MainLoop {
                 MainLoopMessage::ApplyChanges(changes) => {
                     revision += 1;
                     // Automatically cancels any pending queries and waits for them to complete.
-                    db.apply_changes(changes, Some(&self.cli_options));
+                    db.apply_changes(changes, Some(&self.meta_options));
                     if let Some(watcher) = self.watcher.as_mut() {
                         watcher.update(db);
                     }
