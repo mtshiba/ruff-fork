@@ -14,7 +14,7 @@ use crate::DocumentSnapshot;
 use crate::PositionEncoding;
 use crate::document::{FileRangeExt, ToRangeExt};
 use crate::server::Result;
-use crate::server::client::Notifier;
+use crate::server::client_old::Notifier;
 
 use super::LSPResult;
 
