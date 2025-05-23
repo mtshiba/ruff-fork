@@ -13,9 +13,9 @@ use ty_project::{Db, ProjectDatabase};
 use super::LSPResult;
 use crate::DocumentSnapshot;
 use crate::PositionEncoding;
-use crate::client::Client;
 use crate::document::{FileRangeExt, ToRangeExt};
 use crate::server::Result;
+use crate::session::client::Client;
 
 pub(super) fn clear_diagnostics(uri: &Url, client: &Client) -> Result<()> {
     client
