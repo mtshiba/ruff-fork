@@ -894,7 +894,6 @@ declare_lint! {
     }
 }
 
-
 declare_lint! {
     /// ## What it does
     /// Checks for type guard functions without
