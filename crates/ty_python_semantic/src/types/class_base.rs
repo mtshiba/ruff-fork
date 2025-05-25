@@ -146,7 +146,9 @@ impl<'db> ClassBase<'db> {
             | Type::BoundSuper(_)
             | Type::ProtocolInstance(_)
             | Type::AlwaysFalsy
-            | Type::AlwaysTruthy => None,
+            | Type::AlwaysTruthy
+            | Type::TypeIs(_) => None,
+
             Type::KnownInstance(known_instance) => match known_instance {
                 KnownInstanceType::TypeVar(_)
                 | KnownInstanceType::TypeAliasType(_)

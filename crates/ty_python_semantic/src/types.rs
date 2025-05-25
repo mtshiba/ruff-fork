@@ -35,7 +35,7 @@ use crate::module_name::ModuleName;
 use crate::module_resolver::{KnownModule, file_to_module, resolve_module};
 use crate::semantic_index::ast_ids::{HasScopedExpressionId, HasScopedUseId};
 use crate::semantic_index::definition::Definition;
-use crate::semantic_index::symbol::ScopeId;
+use crate::semantic_index::symbol::{ScopeId, ScopedSymbolId};
 use crate::semantic_index::{imported_modules, semantic_index};
 use crate::suppression::check_suppressions;
 use crate::symbol::{
@@ -540,10 +540,12 @@ pub enum Type<'db> {
     /// An instance of a typevar in a generic class or function. When the generic class or function
     /// is specialized, we will replace this typevar with its specialization.
     TypeVar(TypeVarInstance<'db>),
-    // A bound super object like `super()` or `super(A, A())`
-    // This type doesn't handle an unbound super object like `super(A)`; for that we just use
-    // a `Type::NominalInstance` of `builtins.super`.
+    /// A bound super object like `super()` or `super(A, A())`
+    /// This type doesn't handle an unbound super object like `super(A)`; for that we just use
+    /// a `Type::NominalInstance` of `builtins.super`.
     BoundSuper(BoundSuperType<'db>),
+    /// A subtype of `bool` that allows narrowing in both positive and negative cases.
+    TypeIs(TypeIsType<'db>),
     // TODO protocols, overloads, generics
 }
 
@@ -648,6 +650,10 @@ impl<'db> Type<'db> {
             Self::GenericAlias(_) | Self::TypeVar(_) => {
                 // TODO: replace self-references in generic aliases and typevars
                 *self
+            }
+
+            Self::TypeIs(type_is) => {
+                type_is.with_ty(db, type_is.ty(db).replace_self_reference(db, class))
             }
 
             Self::Dynamic(_)
@@ -781,6 +787,8 @@ impl<'db> Type<'db> {
                     .iter()
                     .any(|ty| ty.any_over_type(db, type_fn)),
             },
+
+            Self::TypeIs(type_is) => type_is.ty(db).any_over_type(db, type_fn),
         }
     }
 
@@ -1053,6 +1061,7 @@ impl<'db> Type<'db> {
                 }
                 None => self,
             },
+            Type::TypeIs(type_is) => type_is.ty(db).normalized(db),
             Type::LiteralString
             | Type::AlwaysFalsy
             | Type::AlwaysTruthy
@@ -1257,6 +1266,9 @@ impl<'db> Type<'db> {
                 _,
             ) => (self.literal_fallback_instance(db))
                 .is_some_and(|instance| instance.is_subtype_of(db, target)),
+
+            // `TypeIs[T]` is a subtype of `bool`.
+            (Type::TypeIs(_), _) => KnownClass::Bool.to_instance(db).is_subtype_of(db, target),
 
             (Type::FunctionLiteral(self_function_literal), Type::Callable(_)) => {
                 self_function_literal
@@ -2082,14 +2094,15 @@ impl<'db> Type<'db> {
                 known_instance_ty.is_disjoint_from(db, tuple.homogeneous_supertype(db))
             }
 
-            (Type::BooleanLiteral(..), Type::NominalInstance(instance))
-            | (Type::NominalInstance(instance), Type::BooleanLiteral(..)) => {
+            (Type::BooleanLiteral(..) | Type::TypeIs(_), Type::NominalInstance(instance))
+            | (Type::NominalInstance(instance), Type::BooleanLiteral(..) | Type::TypeIs(_)) => {
                 // A `Type::BooleanLiteral()` must be an instance of exactly `bool`
                 // (it cannot be an instance of a `bool` subclass)
                 !KnownClass::Bool.is_subclass_of(db, instance.class)
             }
 
-            (Type::BooleanLiteral(..), _) | (_, Type::BooleanLiteral(..)) => true,
+            (Type::BooleanLiteral(..) | Type::TypeIs(_), _)
+            | (_, Type::BooleanLiteral(..) | Type::TypeIs(_)) => true,
 
             (Type::IntLiteral(..), Type::NominalInstance(instance))
             | (Type::NominalInstance(instance), Type::IntLiteral(..)) => {
@@ -2290,6 +2303,8 @@ impl<'db> Type<'db> {
                 .iter()
                 .all(|elem| elem.is_fully_static(db)),
             Type::Callable(callable) => callable.is_fully_static(db),
+
+            Type::TypeIs(type_is) => type_is.ty(db).is_fully_static(db),
         }
     }
 
@@ -2304,7 +2319,8 @@ impl<'db> Type<'db> {
             | Type::IntLiteral(..)
             | Type::StringLiteral(..)
             | Type::BytesLiteral(..)
-            | Type::LiteralString => {
+            | Type::LiteralString
+            | Type::TypeIs(_) => {
                 // Note: The literal types included in this pattern are not true singletons.
                 // There can be multiple Python objects (at different memory locations) that
                 // are both of type Literal[345], for example.
@@ -2479,7 +2495,8 @@ impl<'db> Type<'db> {
             | Type::Callable(_)
             | Type::PropertyInstance(_)
             | Type::DataclassDecorator(_)
-            | Type::DataclassTransformer(_) => false,
+            | Type::DataclassTransformer(_)
+            | Type::TypeIs(_) => false,
         }
     }
 
@@ -2592,7 +2609,8 @@ impl<'db> Type<'db> {
             | Type::TypeVar(_)
             | Type::NominalInstance(_)
             | Type::ProtocolInstance(_)
-            | Type::PropertyInstance(_) => None,
+            | Type::PropertyInstance(_)
+            | Type::TypeIs(_) => None,
         }
     }
 
@@ -2692,7 +2710,9 @@ impl<'db> Type<'db> {
             },
 
             Type::IntLiteral(_) => KnownClass::Int.to_instance(db).instance_member(db, name),
-            Type::BooleanLiteral(_) => KnownClass::Bool.to_instance(db).instance_member(db, name),
+            Type::BooleanLiteral(_) | Type::TypeIs(_) => {
+                KnownClass::Bool.to_instance(db).instance_member(db, name)
+            }
             Type::StringLiteral(_) | Type::LiteralString => {
                 KnownClass::Str.to_instance(db).instance_member(db, name)
             }
@@ -3156,7 +3176,8 @@ impl<'db> Type<'db> {
             | Type::TypeVar(..)
             | Type::KnownInstance(..)
             | Type::PropertyInstance(..)
-            | Type::FunctionLiteral(..) => {
+            | Type::FunctionLiteral(..)
+            | Type::TypeIs(..) => {
                 let fallback = self.instance_member(db, name_str);
 
                 let result = self.invoke_descriptor_protocol(
@@ -3397,9 +3418,11 @@ impl<'db> Type<'db> {
         };
 
         let truthiness = match self {
-            Type::Dynamic(_) | Type::Never | Type::Callable(_) | Type::LiteralString => {
-                Truthiness::Ambiguous
-            }
+            Type::Dynamic(_)
+            | Type::Never
+            | Type::Callable(_)
+            | Type::LiteralString
+            | Type::TypeIs(_) => Truthiness::Ambiguous,
 
             Type::FunctionLiteral(_)
             | Type::BoundMethod(_)
@@ -4353,7 +4376,8 @@ impl<'db> Type<'db> {
             | Type::Tuple(_)
             | Type::BoundSuper(_)
             | Type::TypeVar(_)
-            | Type::ModuleLiteral(_) => Signatures::not_callable(self),
+            | Type::ModuleLiteral(_)
+            | Type::TypeIs(_) => Signatures::not_callable(self),
         }
     }
 
@@ -4829,7 +4853,8 @@ impl<'db> Type<'db> {
             | Type::LiteralString
             | Type::BoundSuper(_)
             | Type::AlwaysTruthy
-            | Type::AlwaysFalsy => None,
+            | Type::AlwaysFalsy
+            | Type::TypeIs(_) => None,
         }
     }
 
@@ -4892,7 +4917,8 @@ impl<'db> Type<'db> {
             | Type::FunctionLiteral(_)
             | Type::BoundSuper(_)
             | Type::ProtocolInstance(_)
-            | Type::PropertyInstance(_) => Err(InvalidTypeExpressionError {
+            | Type::PropertyInstance(_)
+            | Type::TypeIs(_) => Err(InvalidTypeExpressionError {
                 invalid_expressions: smallvec::smallvec![InvalidTypeExpression::InvalidType(
                     *self, scope_id
                 )],
@@ -5119,7 +5145,7 @@ impl<'db> Type<'db> {
             Type::KnownInstance(known_instance) => known_instance.to_meta_type(db),
             Type::PropertyInstance(_) => KnownClass::Property.to_class_literal(db),
             Type::Union(union) => union.map(db, |ty| ty.to_meta_type(db)),
-            Type::BooleanLiteral(_) => KnownClass::Bool.to_class_literal(db),
+            Type::BooleanLiteral(_) | Type::TypeIs(_) => KnownClass::Bool.to_class_literal(db),
             Type::BytesLiteral(_) => KnownClass::Bytes.to_class_literal(db),
             Type::IntLiteral(_) => KnownClass::Int.to_class_literal(db),
             Type::FunctionLiteral(_) => KnownClass::FunctionType.to_class_literal(db),
@@ -5315,7 +5341,8 @@ impl<'db> Type<'db> {
             // some other generic context's specialization is applied to it.
             | Type::ClassLiteral(_)
             | Type::BoundSuper(_)
-            | Type::KnownInstance(_) => self,
+            | Type::KnownInstance(_)
+            | Type::TypeIs(_) => self,
         }
     }
 
@@ -5396,6 +5423,10 @@ impl<'db> Type<'db> {
 
             Type::SubclassOf(subclass_of) => {
                 subclass_of.find_legacy_typevars(db, typevars);
+            }
+
+            Type::TypeIs(type_is) => {
+                type_is.ty(db).find_legacy_typevars(db, typevars);
             }
 
             Type::Dynamic(_)
@@ -5524,7 +5555,8 @@ impl<'db> Type<'db> {
             | Self::Never
             | Self::Callable(_)
             | Self::AlwaysTruthy
-            | Self::AlwaysFalsy => None,
+            | Self::AlwaysFalsy
+            | Self::TypeIs(_) => None,
         }
     }
 
@@ -9020,6 +9052,56 @@ impl<'db> BoundSuperType<'db> {
             self.pivot_class(db).normalized(db),
             self.owner(db).normalized(db),
         )
+    }
+}
+
+#[salsa::interned(debug)]
+pub struct TypeIsType<'db> {
+    #[return_ref]
+    ty: Type<'db>,
+    /// The ID of the scope to which the symbol belongs,
+    /// the ID of the symbol itself within that scope,
+    /// and the symbol's name.
+    symbol_info: Option<(ScopeId<'db>, ScopedSymbolId, String)>,
+}
+
+impl<'db> TypeIsType<'db> {
+    pub fn unbound(db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
+        Type::TypeIs(Self::new(db, ty, None))
+    }
+
+    pub fn bound(
+        db: &'db dyn Db,
+        ty: Type<'db>,
+        scope: ScopeId<'db>,
+        symbol: ScopedSymbolId,
+        name: String,
+    ) -> Type<'db> {
+        Type::TypeIs(Self::new(db, ty, Some((scope, symbol, name))))
+    }
+
+    #[must_use]
+    pub fn bind(
+        self,
+        db: &'db dyn Db,
+        scope: ScopeId<'db>,
+        symbol: ScopedSymbolId,
+        name: String,
+    ) -> Type<'db> {
+        Self::bound(db, self.ty(db), scope, symbol, name)
+    }
+
+    #[must_use]
+    pub fn with_ty(self, db: &'db dyn Db, ty: Type<'db>) -> Type<'db> {
+        Type::TypeIs(Self::new(db, ty, self.symbol_info(db)))
+    }
+
+    pub fn is_bound(&self, db: &'db dyn Db) -> bool {
+        self.symbol_info(db).is_some()
+    }
+
+    pub fn is_unbound(&self, db: &'db dyn Db) -> bool {
+        self.symbol_info(db).is_none()
     }
 }
 
