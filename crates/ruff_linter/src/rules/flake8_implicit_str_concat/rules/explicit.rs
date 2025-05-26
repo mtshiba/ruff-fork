@@ -1,11 +1,11 @@
-use ruff_diagnostics::{Diagnostic, Violation};
+use ruff_diagnostics::AlwaysFixableViolation;
+use ruff_diagnostics::{Diagnostic, Edit, Fix};
 use ruff_macros::{ViolationMetadata, derive_message_formats};
 use ruff_python_ast::{self as ast, Expr, Operator};
 use ruff_source_file::LineRanges;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
-use crate::Locator;
-use crate::settings::LinterSettings;
+use crate::checkers::ast::Checker;
 
 /// ## What it does
 /// Checks for string literals that are explicitly concatenated (using the
@@ -34,46 +34,71 @@ use crate::settings::LinterSettings;
 #[derive(ViolationMetadata)]
 pub(crate) struct ExplicitStringConcatenation;
 
-impl Violation for ExplicitStringConcatenation {
+impl AlwaysFixableViolation for ExplicitStringConcatenation {
     #[derive_message_formats]
     fn message(&self) -> String {
         "Explicitly concatenated string should be implicitly concatenated".to_string()
     }
+
+    fn fix_title(&self) -> String {
+        "Remove redundant '+' operator to implicitly concatenate".to_string()
+    }
 }
 
 /// ISC003
-pub(crate) fn explicit(
-    expr: &Expr,
-    locator: &Locator,
-    settings: &LinterSettings,
-) -> Option<Diagnostic> {
+pub(crate) fn explicit(expr: &Expr, checker: &Checker) -> Option<Diagnostic> {
     // If the user sets `allow-multiline` to `false`, then we should allow explicitly concatenated
     // strings that span multiple lines even if this rule is enabled. Otherwise, there's no way
     // for the user to write multiline strings, and that setting is "more explicit" than this rule
     // being enabled.
-    if !settings.flake8_implicit_str_concat.allow_multiline {
+    if !checker.settings.flake8_implicit_str_concat.allow_multiline {
         return None;
     }
 
-    if let Expr::BinOp(ast::ExprBinOp {
-        left,
-        op,
-        right,
-        range,
-    }) = expr
-    {
-        if matches!(op, Operator::Add) {
-            if matches!(
-                left.as_ref(),
-                Expr::FString(_) | Expr::StringLiteral(_) | Expr::BytesLiteral(_)
-            ) && matches!(
-                right.as_ref(),
-                Expr::FString(_) | Expr::StringLiteral(_) | Expr::BytesLiteral(_)
-            ) && locator.contains_line_break(*range)
-            {
-                return Some(Diagnostic::new(ExplicitStringConcatenation, expr.range()));
+    if let Expr::BinOp(bin_op) = expr {
+        if let ast::ExprBinOp {
+            left,
+            right,
+            range,
+            op: Operator::Add,
+        } = bin_op
+        {
+            let concatable = matches!(
+                (left.as_ref(), right.as_ref()),
+                (
+                    Expr::StringLiteral(_) | Expr::FString(_),
+                    Expr::StringLiteral(_) | Expr::FString(_)
+                ) | (Expr::BytesLiteral(_), Expr::BytesLiteral(_))
+            );
+            if concatable && checker.locator().contains_line_break(*range) {
+                let mut diagnostic = Diagnostic::new(ExplicitStringConcatenation, expr.range());
+                diagnostic.set_fix(generate_fix(checker, bin_op));
+                return Some(diagnostic);
             }
         }
     }
     None
+}
+
+fn generate_fix(checker: &Checker, expr_bin_op: &ast::ExprBinOp) -> Fix {
+    let ast::ExprBinOp { left, right, .. } = expr_bin_op;
+    let operator_range = TextRange::new(left.end(), right.start());
+    let operator_text = checker.locator().slice(operator_range);
+
+    let plus_pos = operator_text.find('+').unwrap();
+
+    let (before, after) = operator_text.split_at(plus_pos);
+    let after = &after[1..]; // Ignore `+` operator
+
+    // With `+` on first line a newline isn't in before; trim excess whitespace
+    let before = if before.contains('\n') || before.contains('\r') {
+        before
+    } else {
+        before.trim_end()
+    };
+
+    Fix::safe_edit(Edit::range_replacement(
+        format!("{before}{after}"),
+        operator_range,
+    ))
 }
