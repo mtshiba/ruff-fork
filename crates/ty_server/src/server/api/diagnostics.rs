@@ -10,17 +10,16 @@ use ruff_db::files::FileRange;
 use ruff_db::source::{line_index, source_text};
 use ty_project::{Db, ProjectDatabase};
 
+use super::LSPResult;
 use crate::DocumentSnapshot;
 use crate::PositionEncoding;
 use crate::document::{FileRangeExt, ToRangeExt};
 use crate::server::Result;
-use crate::server::client::Notifier;
+use crate::session::client::Client;
 
-use super::LSPResult;
-
-pub(super) fn clear_diagnostics(uri: &Url, notifier: &Notifier) -> Result<()> {
-    notifier
-        .notify::<PublishDiagnostics>(PublishDiagnosticsParams {
+pub(super) fn clear_diagnostics(uri: &Url, client: &Client) -> Result<()> {
+    client
+        .send_notification::<PublishDiagnostics>(PublishDiagnosticsParams {
             uri: uri.clone(),
             diagnostics: vec![],
             version: None,
