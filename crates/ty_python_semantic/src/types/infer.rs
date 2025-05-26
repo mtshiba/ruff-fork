@@ -58,7 +58,7 @@ use crate::semantic_index::narrowing_constraints::ConstraintKey;
 use crate::semantic_index::symbol::{
     FileScopeId, NodeWithScopeKind, NodeWithScopeRef, ScopeId, ScopeKind, ScopedSymbolId,
 };
-use crate::semantic_index::{EagerSnapshotResult, SemanticIndex, semantic_index};
+use crate::semantic_index::{EagerSnapshotResult, SemanticIndex, semantic_index, symbol_table};
 use crate::symbol::{
     Boundness, LookupError, builtins_module_scope, builtins_symbol, explicit_global_symbol,
     global_symbol, module_type_implicit_global_declaration, module_type_implicit_global_symbol,
@@ -98,13 +98,13 @@ use crate::{Db, FxOrderSet, Program};
 
 use super::context::{InNoTypeCheck, InferContext};
 use super::diagnostic::{
-    INVALID_METACLASS, INVALID_OVERLOAD, INVALID_PROTOCOL, REDUNDANT_CAST, STATIC_ASSERT_ERROR,
-    SUBCLASS_OF_FINAL_CLASS, TYPE_ASSERTION_FAILURE, report_attempted_protocol_instantiation,
-    report_bad_argument_to_get_protocol_members, report_duplicate_bases,
-    report_index_out_of_bounds, report_invalid_exception_caught, report_invalid_exception_cause,
-    report_invalid_exception_raised, report_invalid_or_unsupported_base,
-    report_invalid_type_checking_constant, report_non_subscriptable,
-    report_possibly_unresolved_reference,
+    INVALID_METACLASS, INVALID_OVERLOAD, INVALID_PROTOCOL, INVALID_TYPE_GUARD_CALL, REDUNDANT_CAST,
+    STATIC_ASSERT_ERROR, SUBCLASS_OF_FINAL_CLASS, TYPE_ASSERTION_FAILURE,
+    report_attempted_protocol_instantiation, report_bad_argument_to_get_protocol_members,
+    report_duplicate_bases, report_index_out_of_bounds, report_invalid_exception_caught,
+    report_invalid_exception_cause, report_invalid_exception_raised,
+    report_invalid_or_unsupported_base, report_invalid_type_checking_constant,
+    report_non_subscriptable, report_possibly_unresolved_reference,
     report_runtime_check_against_non_runtime_checkable_protocol, report_slice_step_size_zero,
     report_unresolved_reference,
 };
@@ -114,7 +114,7 @@ use super::string_annotation::{
     BYTE_STRING_TYPE_ANNOTATION, FSTRING_TYPE_ANNOTATION, parse_string_annotation,
 };
 use super::subclass_of::SubclassOfInner;
-use super::{BoundSuperError, BoundSuperType, ClassBase};
+use super::{BoundSuperError, BoundSuperType, ClassBase, TypeIsType};
 
 /// Infer all types for a [`ScopeId`], including all definitions and expressions in that scope.
 /// Use when checking a scope, or needing to provide a type for an arbitrary expression in the
@@ -1810,6 +1810,10 @@ impl<'db> TypeInferenceBuilder<'db> {
             }
 
             let declared_ty = self.file_expression_type(returns);
+            let expected_ty = match declared_ty {
+                Type::TypeIs(_) => KnownClass::Bool.to_instance(self.db()),
+                ty => ty,
+            };
 
             let scope_id = self.index.node_scope(NodeWithScopeRef::Function(function));
             if scope_id.is_generator_function(self.index) {
@@ -1827,7 +1831,7 @@ impl<'db> TypeInferenceBuilder<'db> {
 
                 if !inferred_return
                     .to_instance(self.db())
-                    .is_assignable_to(self.db(), declared_ty)
+                    .is_assignable_to(self.db(), expected_ty)
                 {
                     report_invalid_generator_function_return_type(
                         &self.context,
@@ -1853,7 +1857,7 @@ impl<'db> TypeInferenceBuilder<'db> {
                     ty if ty.is_notimplemented(self.db()) => None,
                     _ => Some(ty_range),
                 })
-                .filter(|ty_range| !ty_range.ty.is_assignable_to(self.db(), declared_ty))
+                .filter(|ty_range| !ty_range.ty.is_assignable_to(self.db(), expected_ty))
             {
                 report_invalid_return_type(
                     &self.context,
@@ -1865,7 +1869,7 @@ impl<'db> TypeInferenceBuilder<'db> {
             }
             let use_def = self.index.use_def_map(scope_id);
             if use_def.can_implicit_return(self.db())
-                && !Type::none(self.db()).is_assignable_to(self.db(), declared_ty)
+                && !Type::none(self.db()).is_assignable_to(self.db(), expected_ty)
             {
                 report_implicit_return_type(
                     &self.context,
@@ -3090,7 +3094,8 @@ impl<'db> TypeInferenceBuilder<'db> {
             | Type::DataclassTransformer(_)
             | Type::TypeVar(..)
             | Type::AlwaysTruthy
-            | Type::AlwaysFalsy => {
+            | Type::AlwaysFalsy
+            | Type::TypeIs(_) => {
                 let is_read_only = || {
                     let dataclass_params = match object_ty {
                         Type::NominalInstance(instance) => match instance.class {
@@ -5494,7 +5499,50 @@ impl<'db> TypeInferenceBuilder<'db> {
                         }
                     }
                 }
-                bindings.return_type(self.db())
+
+                let db = self.db();
+                let scope = self.scope();
+                let return_ty = bindings.return_type(db);
+
+                let find_narrowed_symbol = || match arguments.args.first() {
+                    None => {
+                        // This branch looks extraneous, especially in the face of
+                        // `missing-arguments`. However, that lint won't be able to catch this:
+                        //
+                        // ```python
+                        // def f(v: object = object()) -> TypeIs[int]: ...
+                        //
+                        // if f(): ...
+                        // ```
+                        if let Some(builder) = self
+                            .context
+                            .report_lint(&INVALID_TYPE_GUARD_CALL, arguments)
+                        {
+                            builder.into_diagnostic("Type guard call does not have a target");
+                        }
+                        None
+                    }
+                    Some(ast::Expr::Name(ast::ExprName { id, .. })) => {
+                        let name = id.as_str();
+                        let symbol = symbol_table(db, scope).symbol_id_by_name(name)?;
+
+                        Some((symbol, name.to_string()))
+                    }
+                    // TODO: Attribute and subscript narrowing
+                    Some(expr) => {
+                        None
+                    }
+                };
+
+                // TODO: Handle unions/intersections
+                match return_ty {
+                    // TODO: TypeGuard
+                    Type::TypeIs(type_is) => match find_narrowed_symbol() {
+                        Some((symbol, name)) => type_is.bind(db, scope, symbol, name),
+                        None => return_ty,
+                    },
+                    _ => return_ty,
+                }
             }
 
             Err(CallError(_, bindings)) => {
@@ -5966,7 +6014,8 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::BytesLiteral(_)
                 | Type::Tuple(_)
                 | Type::BoundSuper(_)
-                | Type::TypeVar(_),
+                | Type::TypeVar(_)
+                | Type::TypeIs(_),
             ) => {
                 let unary_dunder_method = match op {
                     ast::UnaryOp::Invert => "__invert__",
@@ -6295,7 +6344,8 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::BytesLiteral(_)
                 | Type::Tuple(_)
                 | Type::BoundSuper(_)
-                | Type::TypeVar(_),
+                | Type::TypeVar(_)
+                | Type::TypeIs(_),
                 Type::FunctionLiteral(_)
                 | Type::Callable(..)
                 | Type::BoundMethod(_)
@@ -6320,7 +6370,8 @@ impl<'db> TypeInferenceBuilder<'db> {
                 | Type::BytesLiteral(_)
                 | Type::Tuple(_)
                 | Type::BoundSuper(_)
-                | Type::TypeVar(_),
+                | Type::TypeVar(_)
+                | Type::TypeIs(_),
                 op,
             ) => {
                 // We either want to call lhs.__op__ or rhs.__rop__. The full decision tree from
@@ -8800,10 +8851,19 @@ impl<'db> TypeInferenceBuilder<'db> {
                 self.infer_type_expression(arguments_slice);
                 todo_type!("`Required[]` type qualifier")
             }
-            KnownInstanceType::TypeIs => {
-                self.infer_type_expression(arguments_slice);
-                todo_type!("`TypeIs[]` special form")
-            }
+            KnownInstanceType::TypeIs => match arguments_slice {
+                ast::Expr::Tuple(_) => {
+                    if let Some(builder) = self.context.report_lint(&INVALID_TYPE_FORM, subscript) {
+                        let diag = builder.into_diagnostic(format_args!(
+                            "Special form `{}` expected exactly one type parameter",
+                            known_instance.repr(self.db())
+                        ));
+                        diagnostic::add_type_expression_reference_link(diag);
+                    }
+                    Type::unknown()
+                }
+                _ => TypeIsType::unbound(self.db(), self.infer_type_expression(arguments_slice)),
+            },
             KnownInstanceType::TypeGuard => {
                 self.infer_type_expression(arguments_slice);
                 todo_type!("`TypeGuard[]` special form")
