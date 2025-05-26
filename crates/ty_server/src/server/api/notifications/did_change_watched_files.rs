@@ -45,7 +45,7 @@ impl SyncNotificationHandler for DidChangeWatchedFiles {
             };
 
             let Some(db) = session.project_db_for_path(system_path.as_std_path()) else {
-                tracing::trace!(
+                tracing::debug!(
                     "Ignoring change event for `{system_path}` because it's not in any workspace"
                 );
                 continue;

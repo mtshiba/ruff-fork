@@ -77,7 +77,7 @@ impl Server {
 
                             self.connection.send(Message::Response(response))?;
                         } else {
-                            tracing::trace!(
+                            tracing::debug!(
                                 "Ignoring response for canceled request id={}",
                                 response.id
                             );
